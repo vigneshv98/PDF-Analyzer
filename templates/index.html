@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KDP PDF Validator</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+            background-color: #f8f9fa;
+        }
+        .main-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+            color: #495057;
+        }
+        .upload-form {
+            margin-bottom: 2rem;
+        }
+        .results-container {
+            display: none;
+            border-top: 1px solid #dee2e6;
+            padding-top: 1.5rem;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 1rem;
+        }
+        .result-item {
+            margin-bottom: 0.5rem;
+        }
+        .status-badge {
+            margin-left: 0.5rem;
+        }
+        .issue-list {
+            margin-top: 0.5rem;
+            padding-left: 1.5rem;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 2rem;
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container main-container">
+        <div class="header">
+            <h1>KDP PDF Validator</h1>
+            <p class="lead">Check if your PDF meets KDP's guidelines for print books</p>
+        </div>
+
+        <div class="upload-form">
+            <form id="pdfUploadForm" enctype="multipart/form-data">
+                <div class="mb-3">
+                    <label for="pdfFile" class="form-label">Select PDF File</label>
+                    <input class="form-control" type="file" id="pdfFile" name="file" accept="application/pdf" required>
+                </div>
+
+                <div class="mb-3">
+                    <label for="bookType" class="form-label">Book Type</label>
+                    <select class="form-select" id="bookType" name="book_type" required>
+                        <option value="paperback" selected>Paperback</option>
+                        <option value="hardcover">Hardcover</option>
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label for="trimSize" class="form-label">Select Trim Size</label>
+                    <select class="form-select" id="trimSize" name="trim_size" required>
+                        <option value="" selected disabled>Choose trim size...</option>
+                        <optgroup label="Paperback Trim Sizes" id="paperbackTrimSizes">
+                            {% for size in paperback_trim_sizes %}
+                            <option value="{{ size }}" data-book-type="paperback">{{ size }} inches</option>
+                            {% endfor %}
+                        </optgroup>
+                        <optgroup label="Hardcover Trim Sizes" id="hardcoverTrimSizes" style="display: none;">
+                            {% for size in hardcover_trim_sizes %}
+                            <option value="{{ size }}" data-book-type="hardcover">{{ size }} inches</option>
+                            {% endfor %}
+                        </optgroup>
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label for="colorOption" class="form-label">Color Option</label>
+                    <select class="form-select" id="colorOption" name="color_option" required>
+                        {% for code, name in color_options.items() %}
+                        <option value="{{ code }}">{{ name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Check PDF</button>
+            </form>
+        </div>
+
+        <div class="loading" id="loadingIndicator">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Processing your PDF...</p>
+        </div>
+
+        <div class="results-container" id="resultsContainer">
+            <h3>Validation Results</h3>
+
+            <div class="result-item" id="trimSizeResult">
+                <strong>Trim Size:</strong>
+                <span id="trimSizeStatus"></span>
+            </div>
+
+            <div class="result-item" id="pageCountResult">
+                <strong>Page Count:</strong>
+                <span id="pageCount"></span>
+                <span id="pageCountStatus"></span>
+            </div>
+
+            <div class="result-item" id="colorSpaceResult">
+                <strong>Color Space:</strong>
+                <span id="colorSpaceStatus"></span>
+                <ul class="issue-list" id="colorSpaceIssues"></ul>
+            </div>
+
+            <div class="result-item" id="bleedResult">
+                <strong>Bleed Area:</strong>
+                <span id="bleedStatus"></span>
+                <ul class="issue-list" id="bleedIssues"></ul>
+            </div>
+
+            <div class="result-item" id="resolutionResult">
+                <strong>Image Resolution:</strong>
+                <span id="resolutionStatus"></span>
+                <ul class="issue-list" id="resolutionIssues"></ul>
+            </div>
+
+            <button class="btn btn-secondary mt-3" id="resetButton">Check Another PDF</button>
+        </div>
+
+        <div class="footer">
+            <p>This tool checks your PDF against KDP's print guidelines. For official guidelines, please refer to the <a href="https://kdp.amazon.com/en_US/help/topic/G201834180" target="_blank">KDP Help Center</a>.</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('pdfUploadForm');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const resultsContainer = document.getElementById('resultsContainer');
+            const resetButton = document.getElementById('resetButton');
+            const bookTypeSelect = document.getElementById('bookType');
+            const trimSizeSelect = document.getElementById('trimSize');
+            const colorOptionSelect = document.getElementById('colorOption');
+            
+            // Show/hide trim size options based on book type
+            bookTypeSelect.addEventListener('change', function() {
+                const bookType = this.value;
+                const paperbackOptions = document.querySelectorAll('#trimSize option[data-book-type="paperback"]');
+                const hardcoverOptions = document.querySelectorAll('#trimSize option[data-book-type="hardcover"]');
+                
+                if (bookType === 'paperback') {
+                    paperbackOptions.forEach(opt => opt.style.display = '');
+                    hardcoverOptions.forEach(opt => opt.style.display = 'none');
+                } else {
+                    paperbackOptions.forEach(opt => opt.style.display = 'none');
+                    hardcoverOptions.forEach(opt => opt.style.display = '');
+                }
+                
+                // Reset trim size selection
+                trimSizeSelect.selectedIndex = 0;
+            });
+            
+            // Validate color option availability based on selection
+            trimSizeSelect.addEventListener('change', function() {
+                // This would require more complex validation in a production app
+                // For now, we'll let the server handle the validation
+            });
+
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                // Show loading indicator
+                form.style.display = 'none';
+                loadingIndicator.style.display = 'block';
+                resultsContainer.style.display = 'none';
+                
+                const formData = new FormData(form);
+                
+                fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Hide loading indicator
+                    loadingIndicator.style.display = 'none';
+                    
+                    // Display results
+                    displayResults(data);
+                    
+                    // Show results container
+                    resultsContainer.style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    loadingIndicator.style.display = 'none';
+                    alert('An error occurred while processing your PDF. Please try again.');
+                    form.style.display = 'block';
+                });
+            });
+            
+            resetButton.addEventListener('click', function() {
+                // Reset form
+                form.reset();
+                
+                // Reset book type to paperback to show correct trim size options
+                bookTypeSelect.value = 'paperback';
+                const event = new Event('change');
+                bookTypeSelect.dispatchEvent(event);
+                
+                // Hide results and show form
+                resultsContainer.style.display = 'none';
+                form.style.display = 'block';
+            });
+            
+            function displayResults(data) {
+                // Trim size result
+                const trimSizeStatus = document.getElementById('trimSizeStatus');
+                if (data.trim_size_match) {
+                    trimSizeStatus.innerHTML = '<span class="badge bg-success status-badge">Passed</span>';
+                } else {
+                    trimSizeStatus.innerHTML = '<span class="badge bg-danger status-badge">Failed</span>';
+                }
+                
+                // Page count result
+                const pageCountStatus = document.getElementById('pageCountStatus');
+                document.getElementById('pageCount').textContent = data.page_count + ' pages';
+                
+                if (data.page_count_valid) {
+                    pageCountStatus.innerHTML = '<span class="badge bg-success status-badge">Passed</span>';
+                } else {
+                    pageCountStatus.innerHTML = '<span class="badge bg-danger status-badge">Failed</span>';
+                }
+                
+                // Color space result
+                const colorSpaceStatus = document.getElementById('colorSpaceStatus');
+                const colorSpaceIssues = document.getElementById('colorSpaceIssues');
+                colorSpaceIssues.innerHTML = '';
+                
+                if (data.color_space_issues.length === 0) {
+                    colorSpaceStatus.innerHTML = '<span class="badge bg-success status-badge">Passed</span>';
+                } else {
+                    colorSpaceStatus.innerHTML = '<span class="badge bg-danger status-badge">Failed</span>';
+                    data.color_space_issues.forEach(issue => {
+                        const li = document.createElement('li');
+                        li.textContent = issue;
+                        colorSpaceIssues.appendChild(li);
+                    });
+                }
+                
+                // Bleed result
+                const bleedStatus = document.getElementById('bleedStatus');
+                const bleedIssues = document.getElementById('bleedIssues');
+                bleedIssues.innerHTML = '';
+                
+                if (data.bleed_issues.length === 0) {
+                    bleedStatus.innerHTML = '<span class="badge bg-success status-badge">Passed</span>';
+                } else {
+                    bleedStatus.innerHTML = '<span class="badge bg-warning status-badge">Warning</span>';
+                    data.bleed_issues.forEach(issue => {
+                        const li = document.createElement('li');
+                        li.textContent = issue;
+                        bleedIssues.appendChild(li);
+                    });
+                }
+                
+                // Resolution result
+                const resolutionStatus = document.getElementById('resolutionStatus');
+                const resolutionIssues = document.getElementById('resolutionIssues');
+                resolutionIssues.innerHTML = '';
+                
+                if (data.resolution_issues.length === 0) {
+                    resolutionStatus.innerHTML = '<span class="badge bg-success status-badge">Passed</span>';
+                } else {
+                    resolutionStatus.innerHTML = '<span class="badge bg-danger status-badge">Failed</span>';
+                    data.resolution_issues.forEach(issue => {
+                        const li = document.createElement('li');
+                        li.textContent = issue;
+                        resolutionIssues.appendChild(li);
+                    });
+                }
+            }
+        });
+    </script>
+</body>
+</html> 
