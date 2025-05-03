@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KDP PDF Validation Results</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <style>
+        body { background: #f2f3f5; font-family: 'Amazon Ember', Arial, sans-serif; color: #232F3E; padding: 2rem; }
+        .main-container { max-width: 1200px; margin: auto; background: #fff; padding: 2rem; border: 1px solid #e0e0e0; border-radius: 4px; }
+        .header { background: #232F3E; color: #fff; padding: 1rem; border-radius: 4px; display: flex; align-items: center; margin-bottom: 1.5rem; }
+        .header img { height: 40px; margin-right: 1rem; }
+        .header h1 { margin: 0; color: #FF9900; font-size: 1.75rem; }
+        .results-card { border: 1px solid #ddd; border-radius: 4px; padding: 1.5rem; background: #fff; }
+        .analysis-list { list-style: none; padding: 0; }
+        .analysis-list li { margin-bottom: 0.75rem; }
+        .carousel-item img { max-height: 500px; object-fit: contain; }
+    </style>
+</head>
+<body>
+    <div class="container main-container">
+        <div class="header">
+            <img src="{{ url_for('static', filename='kdp-logo.png') }}" alt="KDP Logo">
+            <h1>KDP PDF Validator</h1>
+        </div>
+        <div class="row">
+            <div class="col-md-6">
+                <div class="results-card mb-4">
+                    <h3><i class="bi bi-shield-check text-success"></i> Validation Results</h3>
+                    <ul class="analysis-list">
+                        <li><i class="bi bi-check-circle-fill text-{{ 'success' if results.trim_size_match else 'danger' }}"></i> <strong>Trim Size:</strong> {{ 'Passed' if results.trim_size_match else 'Failed' }}{% if not results.trim_size_match %}<div class="small text-danger">{{ results.bleed_issues | join('; ') }}</div>{% endif %}</li>
+                        <li>
+                            <i class="bi bi-check-circle-fill text-{{ 'success' if results.page_count_valid else 'danger' }}"></i>
+                            <strong>Page Count:</strong> {{ results.page_count }}
+                            {% if results.page_count_valid %}
+                                <span class="badge bg-success">Passed</span>
+                            {% else %}
+                                <span class="badge bg-danger">Failed</span>
+                                <div class="small text-danger">
+                                {% for issue in results.bleed_issues %}
+                                    {% if 'page count' in issue.lower() %}
+                                        {{ issue }}{% if not loop.last %}; {% endif %}
+                                    {% endif %}
+                                {% endfor %}
+                                </div>
+                            {% endif %}
+                        </li>
+                        <li><i class="bi bi-check-circle-fill text-{{ 'success' if not results.color_space_issues else 'danger' }}"></i> <strong>Color Space:</strong> {{ 'Passed' if not results.color_space_issues else 'Failed' }}{% if results.color_space_issues %}<div class="small text-danger">{{ results.color_space_issues | join('; ') }}</div>{% endif %}</li>
+                        <li><i class="bi bi-check-circle-fill text-{{ 'success' if not results.bleed_issues else 'warning' }}"></i> <strong>Bleed Area:</strong> {{ 'Passed' if not results.bleed_issues else 'Warning' }}{% if results.bleed_issues %}<div class="small text-danger">{{ results.bleed_issues | join('; ') }}</div>{% endif %}</li>
+                        <li><i class="bi bi-check-circle-fill text-{{ 'success' if not results.resolution_issues else 'danger' }}"></i> <strong>Image Resolution:</strong> {{ 'Passed' if not results.resolution_issues else 'Failed' }}{% if results.resolution_issues %}<div class="small text-danger">{{ results.resolution_issues | join('; ') }}</div>{% endif %}</li>
+                    </ul>
+                    <div class="text-end">
+                        <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Upload</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="results-card">
+                    <h3><i class="bi bi-image"></i> Image Preview</h3>
+                    {% if results.color_space_images %}
+                    <div id="previewCarousel" class="carousel slide" data-bs-ride="false">
+                        <div class="carousel-inner">
+                            {% for img in results.color_space_images %}
+                            <div class="carousel-item {% if loop.first %}active{% endif %}">
+                                <img src="data:image/png;base64,{{ img.image }}" class="d-block w-100" alt="Page {{ img.page }} image">
+                                <div class="carousel-caption">
+                                    Page: {{ img.page }}, Mode: {{ img.mode }}, {{ img.width }}×{{ img.height }}px
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <button class="carousel-control-prev" type="button" data-bs-target="#previewCarousel" data-bs-slide="prev">
+                            <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                            <span class="visually-hidden">Previous</span>
+                        </button>
+                        <button class="carousel-control-next" type="button" data-bs-target="#previewCarousel" data-bs-slide="next">
+                            <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                            <span class="visually-hidden">Next</span>
+                        </button>
+                    </div>
+                    {% else %}
+                    <p>No non-CMYK images found for preview.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html> 

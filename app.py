@@ -5,6 +5,7 @@ from werkzeug.utils import secure_filename
 import fitz  # PyMuPDF
 from PIL import Image
 import tempfile
+import base64
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
@@ -222,9 +223,11 @@ def check_color_space(image):
 
 def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="black_white"):
     """Check if PDF meets KDP guidelines"""
+    print(f"Starting PDF check for {pdf_path}, trim size: {trim_size}, book type: {book_type}, color: {color_option}")
     results = {
         "trim_size_match": False,
         "color_space_issues": [],
+        "color_space_images": [],
         "page_count": 0,
         "page_count_valid": False,
         "bleed_issues": [],
@@ -297,14 +300,17 @@ def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="
     
     # Check images on each page (only for color options that require CMYK)
     if color_option in ["standard_color", "premium_color"]:
+        print(f"Color option requires CMYK check: {color_option}")
         for page_num, page in enumerate(doc):
             # Extract images
             image_list = page.get_images(full=True)
+            print(f"Page {page_num+1}: Found {len(image_list)} images")
             
             for img_index, img_info in enumerate(image_list):
                 xref = img_info[0]
                 base_image = doc.extract_image(xref)
                 image_bytes = base_image["image"]
+                print(f"  Processing image #{img_index+1}, xref: {xref}")
                 
                 # Convert to PIL Image
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file:
@@ -313,9 +319,34 @@ def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="
                 
                 try:
                     with Image.open(temp_file_path) as img:
+                        print(f"  Image mode: {img.mode}, size: {img.width}x{img.height}")
                         # Check color space
                         if not check_color_space(img):
-                            results["color_space_issues"].append(f"Image on page {page_num+1} (#{img_index+1}) is not in CMYK color space")
+                            issue_msg = f"Image on page {page_num+1} (#{img_index+1}) is not in CMYK color space"
+                            results["color_space_issues"].append(issue_msg)
+                            print(f"  NOT CMYK: {issue_msg}")
+                            
+                            # Create a thumbnail for UI display
+                            thumbnail_size = (150, 150)
+                            img_copy = img.copy()
+                            img_copy.thumbnail(thumbnail_size, Image.LANCZOS)
+                            
+                            # Convert to Base64 for sending to frontend
+                            buffer = io.BytesIO()
+                            img_copy.save(buffer, format="PNG")
+                            img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                            img_size = len(img_base64)
+                            print(f"  Created thumbnail, base64 size: {img_size} bytes")
+                            
+                            # Add the image and metadata to results
+                            results["color_space_images"].append({
+                                "image": img_base64,
+                                "page": page_num+1,
+                                "index": img_index+1,
+                                "width": img.width,
+                                "height": img.height,
+                                "mode": img.mode
+                            })
                         
                         # Check resolution
                         if img.width < 300 or img.height < 300:
@@ -334,8 +365,8 @@ def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="
 def index():
     # Pass both trim size options and color options to the template
     return render_template('index.html', 
-                          paperback_trim_sizes=KDP_TRIM_SIZES.keys(),
-                          hardcover_trim_sizes=KDP_HARDCOVER_TRIM_SIZES.keys(),
+                          paperback_trim_sizes=list(KDP_TRIM_SIZES.keys()),
+                          hardcover_trim_sizes=list(KDP_HARDCOVER_TRIM_SIZES.keys()),
                           color_options=COLOR_OPTIONS)
 
 @app.route('/upload', methods=['POST'])
@@ -347,6 +378,8 @@ def upload_file():
     trim_size = request.form.get('trim_size')
     book_type = request.form.get('book_type', 'paperback')
     color_option = request.form.get('color_option', 'black_white')
+    
+    print(f"Upload received: {file.filename}, trim: {trim_size}, type: {book_type}, color: {color_option}")
     
     if file.filename == '':
         return jsonify({"error": "No file selected"}), 400
@@ -364,16 +397,24 @@ def upload_file():
         
         results = check_pdf_for_kdp(filepath, trim_size, book_type, color_option)
         
+        # Log results before sending
+        print(f"Validation results:")
+        print(f"  Trim size match: {results['trim_size_match']}")
+        print(f"  Page count: {results['page_count']}, valid: {results['page_count_valid']}")
+        print(f"  Color space issues: {len(results['color_space_issues'])}")
+        print(f"  Color space images: {len(results['color_space_images'])}")
+        
         # Clean up the uploaded file
         os.remove(filepath)
         
-        return jsonify(results)
+        # Render a separate results page with left-right layout
+        return render_template('results.html', results=results)
 
 @app.route('/templates/index.html')
 def serve_template():
     return render_template('index.html', 
-                          paperback_trim_sizes=KDP_TRIM_SIZES.keys(),
-                          hardcover_trim_sizes=KDP_HARDCOVER_TRIM_SIZES.keys(),
+                          paperback_trim_sizes=list(KDP_TRIM_SIZES.keys()),
+                          hardcover_trim_sizes=list(KDP_HARDCOVER_TRIM_SIZES.keys()),
                           color_options=COLOR_OPTIONS)
 
 if __name__ == '__main__':
