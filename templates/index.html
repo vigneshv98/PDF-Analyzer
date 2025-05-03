@@ -6,31 +6,82 @@
     <title>KDP PDF Validator</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
+        /* Amazon/KDP Branding Variables */
+        :root {
+            --amazon-orange: #FF9900;
+            --amazon-dark: #232F3E;
+            --amazon-font: 'Amazon Ember', Arial, sans-serif;
+        }
         body {
             padding-top: 2rem;
             padding-bottom: 2rem;
-            background-color: #f8f9fa;
+            background-color: #f2f3f5;
+            font-family: var(--amazon-font);
+            color: var(--amazon-dark);
         }
         .main-container {
             max-width: 800px;
             margin: 0 auto;
             background-color: white;
             padding: 2rem;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            border-top: 6px solid var(--amazon-orange);
         }
         .header {
-            text-align: center;
-            margin-bottom: 2rem;
-            color: #495057;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1.5rem;
         }
-        .upload-form {
-            margin-bottom: 2rem;
+        .header h1 {
+            margin-bottom: 0.5rem;
+            font-size: 2rem;
+            font-weight: bold;
         }
+        .header .lead {
+            color: #eaeaea;
+            font-size: 1.1rem;
+        }
+        .upload-form,
         .results-container {
-            display: none;
-            border-top: 1px solid #dee2e6;
-            padding-top: 1.5rem;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            padding: 1.75rem;
+            background-color: #ffffff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            margin-bottom: 1.5rem;
+        }
+        .upload-form label {
+            font-weight: 600;
+            color: var(--amazon-dark);
+        }
+        .form-control,
+        .form-select {
+            border-color: #c0c0c0;
+            border-radius: 4px;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .form-control:focus,
+        .form-select:focus {
+            border-color: var(--amazon-orange);
+            box-shadow: 0 0 0 0.2rem rgba(255,153,0,0.25);
+        }
+        .btn-primary {
+            box-shadow: 0 2px 2px rgba(0,0,0,0.1);
+            padding: 0.6rem 1.2rem;
+            font-size: 1rem;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .results-container h3 {
+            border-bottom: 2px solid var(--amazon-orange);
+            padding-bottom: 0.5rem;
+            margin-bottom: 1rem;
+            color: var(--amazon-dark);
+        }
+        .status-badge {
+            font-size: 0.9rem;
         }
         .loading {
             display: none;
@@ -39,9 +90,6 @@
         }
         .result-item {
             margin-bottom: 0.5rem;
-        }
-        .status-badge {
-            margin-left: 0.5rem;
         }
         .issue-list {
             margin-top: 0.5rem;
@@ -53,100 +101,142 @@
             font-size: 0.8rem;
             color: #6c757d;
         }
+        .btn-primary:hover {
+            background-color: #e68a00;
+            border-color: #e68a00;
+        }
+        .spinner-border {
+            color: var(--amazon-orange);
+        }
+        /* Amazon KDP Header & Link Branding */
+        .bg-amazon-dark {
+            background-color: var(--amazon-dark) !important;
+            color: #fff !important;
+        }
+        .text-orange {
+            color: var(--amazon-orange) !important;
+        }
+        .btn-secondary {
+            background-color: var(--amazon-dark);
+            border-color: var(--amazon-dark);
+            color: #fff;
+        }
+        .btn-secondary:hover {
+            background-color: #1a242f;
+            border-color: #1a242f;
+        }
+        a {
+            color: var(--amazon-orange);
+            transition: color 0.2s ease;
+        }
+        a:hover {
+            color: #e68a00;
+        }
     </style>
 </head>
 <body>
     <div class="container main-container">
-        <div class="header">
-            <h1>KDP PDF Validator</h1>
-            <p class="lead">Check if your PDF meets KDP's guidelines for print books</p>
+        <div class="header bg-amazon-dark d-flex align-items-center mb-4" style="padding:1rem;border-radius:4px;">
+            <img src="{{ url_for('static', filename='kdp-logo.png') }}" alt="KDP Logo" style="height:60px;margin-right:1rem;">
+            <div>
+                <h1 class="text-orange m-0">KDP PDF Validator</h1>
+                <p class="lead m-0" style="color:#eaeaea;">Check if your PDF meets KDP's guidelines for print books</p>
+            </div>
         </div>
 
-        <div class="upload-form">
-            <form id="pdfUploadForm" enctype="multipart/form-data">
-                <div class="mb-3">
-                    <label for="pdfFile" class="form-label">Select PDF File</label>
-                    <input class="form-control" type="file" id="pdfFile" name="file" accept="application/pdf" required>
+        <div class="row gx-4">
+            <div class="col-md-6">
+                <div class="card amazon-card mb-4 upload-form">
+                    <div class="card-body">
+                        <form id="pdfUploadForm" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="pdfFile" class="form-label">Select PDF File</label>
+                                <input class="form-control" type="file" id="pdfFile" name="file" accept="application/pdf" required>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="bookType" class="form-label">Book Type</label>
+                                <select class="form-select" id="bookType" name="book_type" required>
+                                    <option value="paperback" selected>Paperback</option>
+                                    <option value="hardcover">Hardcover</option>
+                                </select>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="trimSize" class="form-label">Select Trim Size</label>
+                                <select class="form-select" id="trimSize" name="trim_size" required>
+                                    <option value="" selected disabled>Choose trim size...</option>
+                                    <optgroup label="Paperback Trim Sizes" id="paperbackTrimSizes">
+                                        {% for size in paperback_trim_sizes %}
+                                        <option value="{{ size }}" data-book-type="paperback">{{ size }} inches</option>
+                                        {% endfor %}
+                                    </optgroup>
+                                    <optgroup label="Hardcover Trim Sizes" id="hardcoverTrimSizes" style="display: none;">
+                                        {% for size in hardcover_trim_sizes %}
+                                        <option value="{{ size }}" data-book-type="hardcover">{{ size }} inches</option>
+                                        {% endfor %}
+                                    </optgroup>
+                                </select>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="colorOption" class="form-label">Color Option</label>
+                                <select class="form-select" id="colorOption" name="color_option" required>
+                                    {% for code, name in color_options.items() %}
+                                    <option value="{{ code }}">{{ name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary">Check PDF</button>
+                        </form>
+                    </div>
                 </div>
-
-                <div class="mb-3">
-                    <label for="bookType" class="form-label">Book Type</label>
-                    <select class="form-select" id="bookType" name="book_type" required>
-                        <option value="paperback" selected>Paperback</option>
-                        <option value="hardcover">Hardcover</option>
-                    </select>
+                <div class="loading" id="loadingIndicator">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Processing your PDF...</p>
                 </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card amazon-card mb-4 results-container" id="resultsContainer" style="display:none;">
+                    <div class="card-body">
+                        <h3>Validation Results</h3>
 
-                <div class="mb-3">
-                    <label for="trimSize" class="form-label">Select Trim Size</label>
-                    <select class="form-select" id="trimSize" name="trim_size" required>
-                        <option value="" selected disabled>Choose trim size...</option>
-                        <optgroup label="Paperback Trim Sizes" id="paperbackTrimSizes">
-                            {% for size in paperback_trim_sizes %}
-                            <option value="{{ size }}" data-book-type="paperback">{{ size }} inches</option>
-                            {% endfor %}
-                        </optgroup>
-                        <optgroup label="Hardcover Trim Sizes" id="hardcoverTrimSizes" style="display: none;">
-                            {% for size in hardcover_trim_sizes %}
-                            <option value="{{ size }}" data-book-type="hardcover">{{ size }} inches</option>
-                            {% endfor %}
-                        </optgroup>
-                    </select>
+                        <div class="result-item" id="trimSizeResult">
+                            <strong>Trim Size:</strong>
+                            <span id="trimSizeStatus"></span>
+                        </div>
+
+                        <div class="result-item" id="pageCountResult">
+                            <strong>Page Count:</strong>
+                            <span id="pageCount"></span>
+                            <span id="pageCountStatus"></span>
+                        </div>
+
+                        <div class="result-item" id="colorSpaceResult">
+                            <strong>Color Space:</strong>
+                            <span id="colorSpaceStatus"></span>
+                            <ul class="issue-list" id="colorSpaceIssues"></ul>
+                        </div>
+
+                        <div class="result-item" id="bleedResult">
+                            <strong>Bleed Area:</strong>
+                            <span id="bleedStatus"></span>
+                            <ul class="issue-list" id="bleedIssues"></ul>
+                        </div>
+
+                        <div class="result-item" id="resolutionResult">
+                            <strong>Image Resolution:</strong>
+                            <span id="resolutionStatus"></span>
+                            <ul class="issue-list" id="resolutionIssues"></ul>
+                        </div>
+
+                        <button class="btn btn-secondary mt-3" id="resetButton">Check Another PDF</button>
+                    </div>
                 </div>
-
-                <div class="mb-3">
-                    <label for="colorOption" class="form-label">Color Option</label>
-                    <select class="form-select" id="colorOption" name="color_option" required>
-                        {% for code, name in color_options.items() %}
-                        <option value="{{ code }}">{{ name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-                <button type="submit" class="btn btn-primary">Check PDF</button>
-            </form>
-        </div>
-
-        <div class="loading" id="loadingIndicator">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
             </div>
-            <p class="mt-2">Processing your PDF...</p>
-        </div>
-
-        <div class="results-container" id="resultsContainer">
-            <h3>Validation Results</h3>
-
-            <div class="result-item" id="trimSizeResult">
-                <strong>Trim Size:</strong>
-                <span id="trimSizeStatus"></span>
-            </div>
-
-            <div class="result-item" id="pageCountResult">
-                <strong>Page Count:</strong>
-                <span id="pageCount"></span>
-                <span id="pageCountStatus"></span>
-            </div>
-
-            <div class="result-item" id="colorSpaceResult">
-                <strong>Color Space:</strong>
-                <span id="colorSpaceStatus"></span>
-                <ul class="issue-list" id="colorSpaceIssues"></ul>
-            </div>
-
-            <div class="result-item" id="bleedResult">
-                <strong>Bleed Area:</strong>
-                <span id="bleedStatus"></span>
-                <ul class="issue-list" id="bleedIssues"></ul>
-            </div>
-
-            <div class="result-item" id="resolutionResult">
-                <strong>Image Resolution:</strong>
-                <span id="resolutionStatus"></span>
-                <ul class="issue-list" id="resolutionIssues"></ul>
-            </div>
-
-            <button class="btn btn-secondary mt-3" id="resetButton">Check Another PDF</button>
         </div>
 
         <div class="footer">
@@ -166,20 +256,34 @@
             
             // Show/hide trim size options based on book type
             bookTypeSelect.addEventListener('change', function() {
-                const bookType = this.value;
-                const paperbackOptions = document.querySelectorAll('#trimSize option[data-book-type="paperback"]');
-                const hardcoverOptions = document.querySelectorAll('#trimSize option[data-book-type="hardcover"]');
-                
-                if (bookType === 'paperback') {
-                    paperbackOptions.forEach(opt => opt.style.display = '');
-                    hardcoverOptions.forEach(opt => opt.style.display = 'none');
+                const paperbackGroup = document.getElementById('paperbackTrimSizes');
+                const hardcoverGroup = document.getElementById('hardcoverTrimSizes');
+
+                if (this.value === 'paperback') {
+                    paperbackGroup.style.display = '';
+                    hardcoverGroup.style.display = 'none';
                 } else {
-                    paperbackOptions.forEach(opt => opt.style.display = 'none');
-                    hardcoverOptions.forEach(opt => opt.style.display = '');
+                    paperbackGroup.style.display = 'none';
+                    hardcoverGroup.style.display = '';
                 }
-                
+
                 // Reset trim size selection
                 trimSizeSelect.selectedIndex = 0;
+                // Hide 'Standard color' if hardcover, else show it
+                const standardOpt = colorOptionSelect.querySelector('option[value="standard_color"]');
+                if (this.value === 'hardcover') {
+                    if (standardOpt) {
+                        standardOpt.style.display = 'none';
+                        // Reset if currently selected
+                        if (colorOptionSelect.value === 'standard_color') {
+                            colorOptionSelect.selectedIndex = 0;
+                        }
+                    }
+                } else {
+                    if (standardOpt) {
+                        standardOpt.style.display = '';
+                    }
+                }
             });
             
             // Validate color option availability based on selection
