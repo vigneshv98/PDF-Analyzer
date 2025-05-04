@@ -7,13 +7,12 @@ A web application to validate PDF files against Amazon KDP (Kindle Direct Publis
 - Upload PDF files for validation
 - Choose between paperback and hardcover book types
 - Select from comprehensive list of KDP trim sizes
+- Enter custom trim sizes within KDP bounds (Width 4"–8.5", Height 6"–11.69")
 - Choose color printing options (black/white, color)
 - Check PDF dimensions against selected trim size
 - Verify if page count is within KDP limits for selected trim size and color option
 - Verify image color spaces (ensuring CMYK for color printing)
 - Check for proper bleed settings
-- Validate image resolution
-- Comprehensive reporting of validation results
 
 ## Setup Instructions
 
@@ -46,17 +45,18 @@ A web application to validate PDF files against Amazon KDP (Kindle Direct Publis
 ## How it Works
 
 1. The application validates PDF files against KDP's official requirements for print books:
-   - Checks if the PDF dimensions match the selected trim size
+   - Checks if the PDF dimensions match the selected trim size or custom dimensions
    - Verifies if the PDF includes the required bleed area (typically 0.125" on all sides)
    - Validates that page count is within allowed limits for the selected trim size and color option
    - For color printing, extracts images from the PDF and confirms they are in CMYK color space
    - Checks image resolution (recommends 300 DPI or higher)
+   - Supports custom trim size input within allowed bounds, applying the same tolerance and page-count limits
 
 2. Results are displayed with clear pass/fail indicators for each requirement
 
 ## Validation Criteria
 
-- **Trim Size**: PDF dimensions must match the selected KDP trim size (with or without bleed)
+- **Trim Size**: PDF dimensions must match the selected KDP trim size (with or without bleed) or a custom size within 4"–8.5" × 6"–11.69".
 - **Page Count**: Number of pages must be within KDP's allowed range for the selected trim size and color option
 - **Bleed Area**: PDF should include the 0.125" bleed area on all sides
 - **Color Space**: For color printing options, all images should be in CMYK color space
