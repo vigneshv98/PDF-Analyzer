@@ -69,6 +69,19 @@
                     </select>
                 </div>
 
+                <!-- Custom dimensions inputs (hidden by default) -->
+                <div class="mb-3" id="customTrimInputs" style="display:none;">
+                    <div class="row g-2">
+                        <div class="col">
+                            <input type="number" step="0.01" class="form-control" id="customWidth" name="custom_width" placeholder="Width (inches)" min="4" max="8.5">
+                        </div>
+                        <div class="col">
+                            <input type="number" step="0.01" class="form-control" id="customHeight" name="custom_height" placeholder="Height (inches)" min="6" max="11.69">
+                        </div>
+                    </div>
+                    <div class="form-text">Width 4"–8.5", Height 6"–11.69"</div>
+                </div>
+
                 <div class="mb-3">
                     <label for="colorOption" class="form-label">Color Option</label>
                     <select class="form-select" id="colorOption" name="color_option" required>
@@ -100,6 +113,10 @@
     <!-- Book Type selection handlers -->
     <script>
     document.addEventListener('DOMContentLoaded', () => {
+        // Grab custom trim inputs
+        const customTrimDiv = document.getElementById('customTrimInputs');
+        const customWidthInput = document.getElementById('customWidth');
+        const customHeightInput = document.getElementById('customHeight');
         // KDP trim sizes passed from server via hidden element
         const sizeDataEl = document.getElementById('sizeData');
         const pbSizes = JSON.parse(sizeDataEl.getAttribute('data-pb'));
@@ -124,6 +141,16 @@
             const type = bookTypeSelect.value;
             // Populate trim sizes based on book type
             populateTrimSizes(type === 'paperback' ? pbSizes : hcSizes);
+            // Remove any existing custom option
+            const existingCustom = trimSizeSelect.querySelector('option[value="custom"]');
+            if (existingCustom) existingCustom.remove();
+            // Add custom trim option only for paperback
+            if (type === 'paperback') {
+                const customOpt = document.createElement('option');
+                customOpt.value = 'custom';
+                customOpt.textContent = 'Custom trim size';
+                trimSizeSelect.appendChild(customOpt);
+            }
             const stdOpt = colorOptionSelect.querySelector('option[value="standard_color"]');
             if (stdOpt) {
                 stdOpt.hidden = type === 'hardcover';
@@ -132,11 +159,28 @@
                     colorOptionSelect.selectedIndex = 0;
                 }
             }
+            // Reset custom inputs
+            customTrimDiv.style.display = 'none';
+            customWidthInput.required = false;
+            customHeightInput.required = false;
         }
 
         // Update trim sizes only on book type change
         bookTypeSelect.addEventListener('change', handleBookTypeChange);
         handleBookTypeChange();
+
+        // Show/hide custom inputs when trim size changes
+        trimSizeSelect.addEventListener('change', () => {
+            if (trimSizeSelect.value === 'custom') {
+                customTrimDiv.style.display = 'block';
+                customWidthInput.required = true;
+                customHeightInput.required = true;
+            } else {
+                customTrimDiv.style.display = 'none';
+                customWidthInput.required = false;
+                customHeightInput.required = false;
+            }
+        });
 
         ['dragenter', 'dragover'].forEach(evt =>
             dropzone.addEventListener(evt, e => {

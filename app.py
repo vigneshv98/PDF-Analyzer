@@ -218,11 +218,19 @@ COLOR_OPTIONS = {
     "premium_color": "Premium color ink and white paper"
 }
 
+# Page count limits by color for custom trim sizes (min_pages, max_pages)
+PAGE_COUNT_LIMITS_BY_COLOR = {
+    "black_white": (24, 828),
+    "black_cream": (24, 776),
+    "standard_color": (72, 600),
+    "premium_color": (24, 828)
+}
+
 def check_color_space(image):
     """Check if an image is in CMYK color space"""
     return image.mode == 'CMYK'
 
-def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="black_white", include_bleed=False):
+def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="black_white", include_bleed=False, custom_width=None, custom_height=None):
     """Check if PDF meets KDP guidelines"""
     print(f"Starting PDF check for {pdf_path}, trim size: {trim_size}, book type: {book_type}, color: {color_option}, include_bleed: {include_bleed}")
     results = {
@@ -233,29 +241,40 @@ def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="
         "page_count_valid": False,
         "bleed_issues": [],
         "file_size_mb": 0.0,
-        "file_size_issues": [],
-        "font_issues": []
+        "file_size_issues": []
     }
     
-    # Select the appropriate trim size data based on book type
-    trim_sizes = KDP_TRIM_SIZES if book_type == "paperback" else KDP_HARDCOVER_TRIM_SIZES
-    
-    # Check if the trim size is valid for the selected book type
-    if trim_size not in trim_sizes:
-        results["bleed_issues"].append(f"Selected trim size {trim_size} is not available for {book_type}")
-        return results
-    
-    # Check if the color option is valid for the selected trim size
-    if color_option not in COLOR_OPTIONS:
-        results["color_space_issues"].append(f"Invalid color option: {color_option}")
-        return results
-    
-    # Check if the color option is available for the selected trim size
-    trim_data = trim_sizes[trim_size]
-    page_limits = trim_data[2].get(color_option)
-    if page_limits is None:
-        results["color_space_issues"].append(f"{COLOR_OPTIONS[color_option]} is not available for {trim_size} {book_type}")
-        return results
+    # Handle custom trim size (only for paperback)
+    if trim_size == 'custom':
+        try:
+            width = float(custom_width)
+            height = float(custom_height)
+        except (TypeError, ValueError):
+            results["bleed_issues"].append("Invalid custom trim dimensions")
+            return results
+        # Validate bounds for custom trim
+        if not (4 <= width <= 8.5 and 6 <= height <= 11.69):
+            results["bleed_issues"].append("Custom trim size out of allowed range")
+            return results
+        trim_data = (width, height, None)
+        # Use same page-count limits by color for custom sizes
+        page_limits = PAGE_COUNT_LIMITS_BY_COLOR.get(color_option)
+        if page_limits is None:
+            results["color_space_issues"].append(f"Invalid color option: {color_option}")
+            return results
+    else:
+        # Select the appropriate trim size data based on book type
+        trim_sizes = KDP_TRIM_SIZES if book_type == "paperback" else KDP_HARDCOVER_TRIM_SIZES
+        # Check if the trim size is valid for the selected book type
+        if trim_size not in trim_sizes:
+            results["bleed_issues"].append(f"Selected trim size {trim_size} is not available for {book_type}")
+            return results
+        # Validate color option availability
+        trim_data = trim_sizes[trim_size]
+        page_limits = trim_data[2].get(color_option)
+        if page_limits is None:
+            results["color_space_issues"].append(f"{COLOR_OPTIONS[color_option]} is not available for {trim_size} {book_type}")
+            return results
     
     # Open the PDF
     doc = fitz.open(pdf_path)
@@ -304,27 +323,6 @@ def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="
             f"expected size ({width_with_bleed:.2f}\" x {height_with_bleed:.2f}\")"
         )
         results["bleed_issues"].append(issue_text)
-    
-    # Check fonts for embedding
-    print("Checking font embedding...")
-    non_embedded_fonts = set()
-    for page_num, page in enumerate(doc):
-        fonts = page.get_fonts()
-        for font in fonts:
-            # Format is: (xref, name, type, embedded, used, buffer)
-            # Where embedded is a boolean indicating if font is embedded
-            font_name = font[1].decode('utf-8', errors='replace') if isinstance(font[1], bytes) else str(font[1])
-            is_embedded = font[3]  # The embedded flag
-            if not is_embedded:
-                non_embedded_fonts.add(font_name)
-                print(f"  Non-embedded font found on page {page_num+1}: {font_name}")
-    
-    if non_embedded_fonts:
-        font_list = ", ".join(non_embedded_fonts)
-        results["font_issues"].append(f"Non-embedded fonts found: {font_list}")
-        print(f"Found {len(non_embedded_fonts)} non-embedded fonts")
-    else:
-        print("All fonts are properly embedded")
     
     # Check images on each page (only for color options that require CMYK)
     if color_option in ["standard_color", "premium_color"]:
@@ -434,18 +432,15 @@ def upload_file():
     if file.filename == '':
         return jsonify({"error": "No file selected"}), 400
     
-    # Select the appropriate trim size dictionary based on book type
-    trim_sizes = KDP_TRIM_SIZES if book_type == "paperback" else KDP_HARDCOVER_TRIM_SIZES
-    
-    if not trim_size or trim_size not in trim_sizes:
-        return jsonify({"error": "Invalid trim size"}), 400
-    
     if file:
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        results = check_pdf_for_kdp(filepath, trim_size, book_type, color_option, include_bleed)
+        # Pass custom dimensions if provided
+        custom_width = request.form.get('custom_width')
+        custom_height = request.form.get('custom_height')
+        results = check_pdf_for_kdp(filepath, trim_size, book_type, color_option, include_bleed, custom_width, custom_height)
         
         # Determine grouping block size based on total page count
         total_pages = results.get("page_count", 0)
@@ -474,7 +469,6 @@ def upload_file():
         print(f"  Page count: {results['page_count']}, valid: {results['page_count_valid']}")
         print(f"  Color space issues: {len(results['color_space_issues'])}")
         print(f"  Color space images: {len(results['color_space_images'])}")
-        print(f"  Font issues: {len(results['font_issues'])}")
         print(f"  File size: {results['file_size_mb']} MB")
         
         # Clean up the uploaded file

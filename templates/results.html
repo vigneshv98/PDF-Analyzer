@@ -146,16 +146,6 @@
                                 <div class="small text-danger">{{ results.file_size_issues | join('; ') }}</div>
                             {% endif %}
                         </li>
-                        <li>
-                            <i class="bi bi-check-circle-fill text-{{ 'success' if not results.font_issues else 'danger' }}"></i>
-                            <strong>Font Embedding:</strong> 
-                            {% if not results.font_issues %}
-                                <span class="badge bg-success">Passed</span> All fonts properly embedded
-                            {% else %}
-                                <span class="badge bg-danger">Failed</span>
-                                <div class="small text-danger">{{ results.font_issues | join('; ') }}</div>
-                            {% endif %}
-                        </li>
                     </ul>
                     <div class="text-end">
                         <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Upload</a>
@@ -187,6 +177,8 @@
                                 <span class="visually-hidden">Next</span>
                             </button>
                         </div>
+                    {% elif color_option in ['black_white', 'black_cream'] %}
+                        <div class="alert alert-info mt-3">Preview is available only if the color ink option is selected.</div>
                     {% endif %}
                 </div>
             </div>
