@@ -16,6 +16,40 @@
         .analysis-list { list-style: none; padding: 0; }
         .analysis-list li { margin-bottom: 0.75rem; }
         .carousel-item img { max-height: 500px; object-fit: contain; }
+        /* White carousel arrows on dark translucent circles */
+        .carousel-control-prev-icon,
+        .carousel-control-next-icon {
+            /* Clear Bootstrap default */
+            background-image: none !important;
+            /* Dark circular background */
+            background-color: rgba(0,0,0,0.6) !important;
+            border-radius: 50% !important;
+            width: 2.5rem !important;
+            height: 2.5rem !important;
+            padding: 0.6rem !important;
+            background-repeat: no-repeat !important;
+            background-position: center !important;
+        }
+        /* White left arrow */
+        .carousel-control-prev-icon {
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg'%20fill='%23fff'%20viewBox='0%200%208%208'%3E%3Cpath d='M3.5%200L4.5%201%203%202.5%208%204%203%205.5%204.5%207%203.5%208%200%204z'/%3E%3C/svg%3E") !important;
+        }
+        /* White right arrow */
+        .carousel-control-next-icon {
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg'%20fill='%23fff'%20viewBox='0%200%208%208'%3E%3Cpath d='M4.5%200L3.5%201%205%202.5%200%204%205%205.5%203.5%207%204.5%208%208%204z'/%3E%3C/svg%3E") !important;
+        }
+        /* Caption background & text for readability */
+        .carousel-caption {
+            background-color: rgba(0, 0, 0, 0.7) !important;
+            color: #fff !important;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+            text-shadow: none;
+            left: 50%; transform: translateX(-50%);
+            bottom: 1rem;
+            max-width: 90%;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -29,7 +63,16 @@
                 <div class="results-card mb-4">
                     <h3><i class="bi bi-shield-check text-success"></i> Validation Results</h3>
                     <ul class="analysis-list">
-                        <li><i class="bi bi-check-circle-fill text-{{ 'success' if results.trim_size_match else 'danger' }}"></i> <strong>Trim Size:</strong> {{ 'Passed' if results.trim_size_match else 'Failed' }}{% if not results.trim_size_match %}<div class="small text-danger">{{ results.bleed_issues | join('; ') }}</div>{% endif %}</li>
+                        <li>
+                            <i class="bi bi-check-circle-fill text-{{ 'success' if results.trim_size_match else 'danger' }}"></i>
+                            <strong>Trim Size:</strong>
+                            {% if results.trim_size_match %}
+                                <span class="badge bg-success">Passed</span>
+                            {% else %}
+                                <span class="badge bg-danger">Failed</span>
+                                <div class="small text-danger">{{ results.bleed_issues | join('; ') }}</div>
+                            {% endif %}
+                        </li>
                         <li>
                             <i class="bi bi-check-circle-fill text-{{ 'success' if results.page_count_valid else 'danger' }}"></i>
                             <strong>Page Count:</strong> {{ results.page_count }}
@@ -46,9 +89,73 @@
                                 </div>
                             {% endif %}
                         </li>
-                        <li><i class="bi bi-check-circle-fill text-{{ 'success' if not results.color_space_issues else 'danger' }}"></i> <strong>Color Space:</strong> {{ 'Passed' if not results.color_space_issues else 'Failed' }}{% if results.color_space_issues %}<div class="small text-danger">{{ results.color_space_issues | join('; ') }}</div>{% endif %}</li>
-                        <li><i class="bi bi-check-circle-fill text-{{ 'success' if not results.bleed_issues else 'warning' }}"></i> <strong>Bleed Area:</strong> {{ 'Passed' if not results.bleed_issues else 'Warning' }}{% if results.bleed_issues %}<div class="small text-danger">{{ results.bleed_issues | join('; ') }}</div>{% endif %}</li>
-                        <li><i class="bi bi-check-circle-fill text-{{ 'success' if not results.resolution_issues else 'danger' }}"></i> <strong>Image Resolution:</strong> {{ 'Passed' if not results.resolution_issues else 'Failed' }}{% if results.resolution_issues %}<div class="small text-danger">{{ results.resolution_issues | join('; ') }}</div>{% endif %}</li>
+                        <li>
+                            <i class="bi bi-check-circle-fill text-{{ 'success' if results.color_space_images|length == 0 else 'danger' }}"></i>
+                            <strong>Color Space:</strong> {{ 'Passed' if results.color_space_images|length == 0 else 'Non-CMYK images found' }}
+                            {% if results.color_space_images %}
+                            <!-- Thumbnails grouped by 10-page ranges -->
+                            <div class="accordion accordion-flush mt-2" id="csRangeAccordion">
+                              {% for range_label, imgs in page_ranges.items() %}
+                              <div class="accordion-item">
+                                <h2 class="accordion-header" id="headingRange{{ loop.index }}">
+                                  <button class="accordion-button collapsed" type="button"
+                                          data-bs-toggle="collapse" data-bs-target="#collapseRange{{ loop.index }}"
+                                          aria-expanded="false" aria-controls="collapseRange{{ loop.index }}">
+                                    {{ range_label }} &ndash; {{ imgs|length }} image{{ 's' if imgs|length>1 else '' }}
+                                  </button>
+                                </h2>
+                                <div id="collapseRange{{ loop.index }}" class="accordion-collapse collapse"
+                                     aria-labelledby="headingRange{{ loop.index }}" data-bs-parent="#csRangeAccordion">
+                                  <div class="accordion-body py-1">
+                                    <div class="d-flex flex-wrap">
+                                      {% for img in imgs %}
+                                      <div class="m-1 text-center">
+                                        <a href="#" class="preview-link" data-slide-index="{{ img.slide_index }}">
+                                          <img src="data:image/png;base64,{{ img.image }}" class="img-thumbnail" style="width:100px; height:auto;" alt="Page {{ img.page }} #{{ img.index }}">
+                                        </a>
+                                        <div class="small text-danger">Pg {{ img.page }}, #{{ img.index }}</div>
+                                      </div>
+                                      {% endfor %}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                              {% endfor %}
+                            </div>
+                            {% endif %}
+                        </li>
+                        {% if include_bleed %}
+                        <li>
+                            <i class="bi bi-check-circle-fill text-{{ 'success' if not results.bleed_issues else 'warning' }}"></i>
+                            <strong>Bleed Area:</strong>
+                            {% if not results.bleed_issues %}
+                                <span class="badge bg-success">Passed</span>
+                            {% else %}
+                                <span class="badge bg-warning text-dark">Warning</span>
+                                <div class="small text-danger">{{ results.bleed_issues | join('; ') }}</div>
+                            {% endif %}
+                        </li>
+                        {% endif %}
+                        <li>
+                            <i class="bi bi-check-circle-fill text-{{ 'success' if not results.file_size_issues else 'danger' }}"></i>
+                            <strong>File Size:</strong> {{ results.file_size_mb }} MB
+                            {% if not results.file_size_issues %}
+                                <span class="badge bg-success">Passed</span>
+                            {% else %}
+                                <span class="badge bg-danger">Failed</span>
+                                <div class="small text-danger">{{ results.file_size_issues | join('; ') }}</div>
+                            {% endif %}
+                        </li>
+                        <li>
+                            <i class="bi bi-check-circle-fill text-{{ 'success' if not results.font_issues else 'danger' }}"></i>
+                            <strong>Font Embedding:</strong> 
+                            {% if not results.font_issues %}
+                                <span class="badge bg-success">Passed</span> All fonts properly embedded
+                            {% else %}
+                                <span class="badge bg-danger">Failed</span>
+                                <div class="small text-danger">{{ results.font_issues | join('; ') }}</div>
+                            {% endif %}
+                        </li>
                     </ul>
                     <div class="text-end">
                         <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Upload</a>
@@ -58,34 +165,46 @@
             <div class="col-md-6">
                 <div class="results-card">
                     <h3><i class="bi bi-image"></i> Image Preview</h3>
-                    {% if results.color_space_images %}
-                    <div id="previewCarousel" class="carousel slide" data-bs-ride="false">
-                        <div class="carousel-inner">
-                            {% for img in results.color_space_images %}
-                            <div class="carousel-item {% if loop.first %}active{% endif %}">
-                                <img src="data:image/png;base64,{{ img.image }}" class="d-block w-100" alt="Page {{ img.page }} image">
-                                <div class="carousel-caption">
-                                    Page: {{ img.page }}, Mode: {{ img.mode }}, {{ img.width }}×{{ img.height }}px
+                    {% if color_option not in ['black_white', 'black_cream'] and results.color_space_images %}
+                        <!-- Preview carousel -->
+                        <div id="previewCarousel" class="carousel slide" data-bs-ride="false">
+                            <div class="carousel-inner">
+                                {% for img in results.color_space_images %}
+                                <div class="carousel-item {% if loop.first %}active{% endif %}">
+                                    <img src="data:image/png;base64,{{ img.image }}" class="d-block w-100" alt="Page {{ img.page }} image">
+                                    <div class="carousel-caption">
+                                        Page: {{ img.page }}, Mode: {{ img.mode }}, {{ img.width }}×{{ img.height }}px
+                                    </div>
                                 </div>
+                                {% endfor %}
                             </div>
-                            {% endfor %}
+                            <button class="carousel-control-prev" type="button" data-bs-target="#previewCarousel" data-bs-slide="prev">
+                                <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                                <span class="visually-hidden">Previous</span>
+                            </button>
+                            <button class="carousel-control-next" type="button" data-bs-target="#previewCarousel" data-bs-slide="next">
+                                <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                                <span class="visually-hidden">Next</span>
+                            </button>
                         </div>
-                        <button class="carousel-control-prev" type="button" data-bs-target="#previewCarousel" data-bs-slide="prev">
-                            <span class="carousel-control-prev-icon" aria-hidden="true"></span>
-                            <span class="visually-hidden">Previous</span>
-                        </button>
-                        <button class="carousel-control-next" type="button" data-bs-target="#previewCarousel" data-bs-slide="next">
-                            <span class="carousel-control-next-icon" aria-hidden="true"></span>
-                            <span class="visually-hidden">Next</span>
-                        </button>
-                    </div>
-                    {% else %}
-                    <p>No non-CMYK images found for preview.</p>
                     {% endif %}
                 </div>
             </div>
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+    // Handle preview-link clicks to navigate carousel
+    document.querySelectorAll('.preview-link').forEach(link => {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            const idx = parseInt(this.getAttribute('data-slide-index'));
+            const carouselEl = document.getElementById('previewCarousel');
+            const carousel = bootstrap.Carousel.getOrCreateInstance(carouselEl);
+            carousel.to(idx);
+            carouselEl.scrollIntoView({behavior:'smooth'});
+        });
+    });
+    </script>
 </body>
 </html> 

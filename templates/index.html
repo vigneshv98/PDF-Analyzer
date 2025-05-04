@@ -18,9 +18,20 @@
         .header h1 { margin:0; color:var(--amazon-orange); font-size:1.75rem; }
         .dropzone { border:2px dashed #ccc; border-radius:4px; padding:2rem; text-align:center; background:#fafafa; cursor:pointer; }
         .dropzone:hover { background:#f0f0f0; }
+        .dropzone-hover { border-color:var(--amazon-dark); background:#ddd; }
         .analysis-card { background:#fff; border:1px solid #ddd; border-radius:4px; padding:1.5rem; margin-bottom:1.5rem; }
         .analysis-header { display:flex; align-items:center; font-size:1.25rem; margin-bottom:1rem; }
         .analysis-header i { margin-right:0.5rem; }
+        /* Amazon Orange button style */
+        .btn-amazon {
+            background-color: var(--amazon-orange) !important;
+            border-color: var(--amazon-orange) !important;
+            color: #fff !important;
+        }
+        .btn-amazon:hover {
+            background-color: #e68a00 !important; /* Slightly darker on hover */
+            border-color: #e68a00 !important;
+        }
     </style>
 </head>
 <body>
@@ -55,12 +66,6 @@
                     <label for="trimSize" class="form-label">Trim Size</label>
                     <select class="form-select" id="trimSize" name="trim_size" required>
                         <option value="" disabled selected>Choose trim size...</option>
-                        {% for size in paperback_trim_sizes %}
-                        <option value="{{ size }}">{{ size }} inches</option>
-                        {% endfor %}
-                        {% for size in hardcover_trim_sizes %}
-                        <option value="{{ size }}">{{ size }} inches</option>
-                        {% endfor %}
                     </select>
                 </div>
 
@@ -73,7 +78,12 @@
                     </select>
                 </div>
 
-                <button type="submit" class="btn btn-primary w-100 mt-3">Check PDF</button>
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="bleedCheck" name="include_bleed" value="true">
+                    <label class="form-check-label" for="bleedCheck">Does it include Bleed?</label>
+                </div>
+
+                <button type="submit" class="btn btn-amazon w-100 mt-3">Check PDF</button>
             </div>
         </form>
 
@@ -83,37 +93,82 @@
         </div>
     </div>
 
+    <!-- Hidden size data for JS -->
+    <div id="sizeData" data-pb='{{ paperback_trim_sizes|tojson }}' data-hc='{{ hardcover_trim_sizes|tojson }}' style="display:none;"></div>
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <!-- Book Type selection handlers -->
     <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      const bookTypeSelect = document.getElementById('bookType');
-      const trimSizeSelect = document.getElementById('trimSize');
-      const colorOptionSelect = document.getElementById('colorOption');
-      const pbSizes = {{ paperback_trim_sizes|tojson }};
-      const hcSizes = {{ hardcover_trim_sizes|tojson }};
-      bookTypeSelect.addEventListener('change', function() {
-        const type = this.value;
-        Array.from(trimSizeSelect.options).forEach(opt => {
-          if (!opt.value) return;
-          const allowed = type === 'paperback' ? pbSizes.includes(opt.value) : hcSizes.includes(opt.value);
-          opt.hidden = !allowed;
-          opt.disabled = !allowed;
-        });
-        trimSizeSelect.selectedIndex = 0;
-        // Hide standard_color for hardcover
-        const stdOpt = colorOptionSelect.querySelector('option[value="standard_color"]');
-        if (stdOpt) {
-          stdOpt.hidden = (type === 'hardcover');
-          stdOpt.disabled = (type === 'hardcover');
-          if (type === 'hardcover' && colorOptionSelect.value === 'standard_color') {
-            colorOptionSelect.selectedIndex = 0;
-          }
+    document.addEventListener('DOMContentLoaded', () => {
+        // KDP trim sizes passed from server via hidden element
+        const sizeDataEl = document.getElementById('sizeData');
+        const pbSizes = JSON.parse(sizeDataEl.getAttribute('data-pb'));
+        const hcSizes = JSON.parse(sizeDataEl.getAttribute('data-hc'));
+        const bookTypeSelect = document.getElementById('bookType');
+        const trimSizeSelect = document.getElementById('trimSize');
+        const colorOptionSelect = document.getElementById('colorOption');
+        const dropzone = document.querySelector('.dropzone');
+        const pdfFileInput = document.getElementById('pdfFile');
+
+        function populateTrimSizes(sizes) {
+            trimSizeSelect.innerHTML = '<option value="" disabled selected>Choose trim size...</option>';
+            sizes.forEach(size => {
+                const opt = document.createElement('option');
+                opt.value = size;
+                opt.textContent = `${size} inches`;
+                trimSizeSelect.appendChild(opt);
+            });
         }
-      });
-      // Trigger on load
-      bookTypeSelect.dispatchEvent(new Event('change'));
+
+        function handleBookTypeChange() {
+            const type = bookTypeSelect.value;
+            // Populate trim sizes based on book type
+            populateTrimSizes(type === 'paperback' ? pbSizes : hcSizes);
+            const stdOpt = colorOptionSelect.querySelector('option[value="standard_color"]');
+            if (stdOpt) {
+                stdOpt.hidden = type === 'hardcover';
+                stdOpt.disabled = type === 'hardcover';
+                if (type === 'hardcover' && colorOptionSelect.value === 'standard_color') {
+                    colorOptionSelect.selectedIndex = 0;
+                }
+            }
+        }
+
+        // Update trim sizes only on book type change
+        bookTypeSelect.addEventListener('change', handleBookTypeChange);
+        handleBookTypeChange();
+
+        ['dragenter', 'dragover'].forEach(evt =>
+            dropzone.addEventListener(evt, e => {
+                e.preventDefault(); e.stopPropagation();
+                dropzone.classList.add('dropzone-hover');
+            })
+        );
+        // Handle file drop
+        dropzone.addEventListener('dragleave', e => {
+            e.preventDefault(); e.stopPropagation();
+            dropzone.classList.remove('dropzone-hover');
+        });
+        dropzone.addEventListener('drop', e => {
+            e.preventDefault(); e.stopPropagation();
+            dropzone.classList.remove('dropzone-hover');
+            if (e.dataTransfer.files.length) {
+                // Use DataTransfer to set the file input
+                const dt = new DataTransfer();
+                for (const file of e.dataTransfer.files) {
+                    dt.items.add(file);
+                }
+                pdfFileInput.files = dt.files;
+                // Show the file name in the drop zone
+                dropzone.innerHTML = `<p>${dt.files[0].name}</p>`;
+            }
+        });
+        // Display selected file name when using file picker
+        pdfFileInput.addEventListener('change', () => {
+            if (pdfFileInput.files.length) {
+                dropzone.innerHTML = `<p>${pdfFileInput.files[0].name}</p>`;
+            }
+        });
     });
     </script>
 </body>

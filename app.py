@@ -6,6 +6,7 @@ import fitz  # PyMuPDF
 from PIL import Image
 import tempfile
 import base64
+import re
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
@@ -221,9 +222,9 @@ def check_color_space(image):
     """Check if an image is in CMYK color space"""
     return image.mode == 'CMYK'
 
-def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="black_white"):
+def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="black_white", include_bleed=False):
     """Check if PDF meets KDP guidelines"""
-    print(f"Starting PDF check for {pdf_path}, trim size: {trim_size}, book type: {book_type}, color: {color_option}")
+    print(f"Starting PDF check for {pdf_path}, trim size: {trim_size}, book type: {book_type}, color: {color_option}, include_bleed: {include_bleed}")
     results = {
         "trim_size_match": False,
         "color_space_issues": [],
@@ -231,7 +232,9 @@ def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="
         "page_count": 0,
         "page_count_valid": False,
         "bleed_issues": [],
-        "resolution_issues": []
+        "file_size_mb": 0.0,
+        "file_size_issues": [],
+        "font_issues": []
     }
     
     # Select the appropriate trim size data based on book type
@@ -277,26 +280,51 @@ def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="
     width_in = width_pt / 72
     height_in = height_pt / 72
     
-    # Check trim size (accounting for bleed)
-    target_width, target_height = trim_data[0], trim_data[1]
-    bleed_allowance = 0.125  # Standard 1/8 inch bleed
-    
-    # Check with bleed allowance
-    width_with_bleed = target_width + (2 * bleed_allowance)
-    height_with_bleed = target_height + (2 * bleed_allowance)
-    
-    # Tolerances for comparison (0.05 inch)
-    tolerance = 0.05
-    
-    if (abs(width_in - width_with_bleed) <= tolerance and 
-        abs(height_in - height_with_bleed) <= tolerance):
-        results["trim_size_match"] = True
-    elif (abs(width_in - target_width) <= tolerance and 
-          abs(height_in - target_height) <= tolerance):
-        results["trim_size_match"] = True
-        results["bleed_issues"].append("PDF dimensions match trim size but don't include bleed")
+    # Bleed allowances: if bleed included, width uses +0.125", height uses +0.25"
+    if include_bleed:
+        width_with_bleed = trim_data[0] + 0.125
+        height_with_bleed = trim_data[1] + 0.25
     else:
-        results["bleed_issues"].append(f"PDF dimensions ({width_in:.2f}\" x {height_in:.2f}\") don't match selected trim size ({target_width}\" x {target_height}\") with or without bleed")
+        width_with_bleed = trim_data[0]
+        height_with_bleed = trim_data[1]
+    
+    # Tolerance for dimension comparison (0.05 inch)
+    tolerance = 0.05
+    # Compare actual dimensions to expected (with or without bleed)
+    if abs(width_in - width_with_bleed) <= tolerance and abs(height_in - height_with_bleed) <= tolerance:
+        results["trim_size_match"] = True
+    elif include_bleed and abs(width_in - trim_data[0]) <= tolerance and abs(height_in - trim_data[1]) <= tolerance:
+        # Dimensions match trim but without bleed
+        results["trim_size_match"] = True
+        results["bleed_issues"].append("PDF dimensions match trim size but doesn't include bleed")
+    else:
+        # Mismatch
+        issue_text = (
+            f"PDF dimensions ({width_in:.2f}\" x {height_in:.2f}\") don't match "
+            f"expected size ({width_with_bleed:.2f}\" x {height_with_bleed:.2f}\")"
+        )
+        results["bleed_issues"].append(issue_text)
+    
+    # Check fonts for embedding
+    print("Checking font embedding...")
+    non_embedded_fonts = set()
+    for page_num, page in enumerate(doc):
+        fonts = page.get_fonts()
+        for font in fonts:
+            # Format is: (xref, name, type, embedded, used, buffer)
+            # Where embedded is a boolean indicating if font is embedded
+            font_name = font[1].decode('utf-8', errors='replace') if isinstance(font[1], bytes) else str(font[1])
+            is_embedded = font[3]  # The embedded flag
+            if not is_embedded:
+                non_embedded_fonts.add(font_name)
+                print(f"  Non-embedded font found on page {page_num+1}: {font_name}")
+    
+    if non_embedded_fonts:
+        font_list = ", ".join(non_embedded_fonts)
+        results["font_issues"].append(f"Non-embedded fonts found: {font_list}")
+        print(f"Found {len(non_embedded_fonts)} non-embedded fonts")
+    else:
+        print("All fonts are properly embedded")
     
     # Check images on each page (only for color options that require CMYK)
     if color_option in ["standard_color", "premium_color"]:
@@ -347,16 +375,37 @@ def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="
                                 "height": img.height,
                                 "mode": img.mode
                             })
-                        
-                        # Check resolution
-                        if img.width < 300 or img.height < 300:
-                            results["resolution_issues"].append(f"Image on page {page_num+1} (#{img_index+1}) has low resolution")
                 except Exception as e:
                     results["color_space_issues"].append(f"Error processing image on page {page_num+1}: {str(e)}")
                 finally:
-                    # Clean up
+                    # Clean up temporary file
                     if os.path.exists(temp_file_path):
                         os.unlink(temp_file_path)
+    
+    # Assign slide indices for image preview links
+    for i, img in enumerate(results["color_space_images"]):
+        img["slide_index"] = i
+    # Summarize non-CMYK color-space issues by page for readability
+    if results["color_space_issues"]:
+        page_counts = {}
+        for issue in results["color_space_issues"]:
+            m = re.search(r"Image on page (\d+)", issue)
+            if m:
+                pg = m.group(1)
+                page_counts[pg] = page_counts.get(pg, 0) + 1
+        grouped = []
+        for pg, cnt in sorted(page_counts.items(), key=lambda x: int(x[0])):
+            grouped.append(f"{cnt} non-CMYK image{'s' if cnt > 1 else ''} on page {pg}")
+        results["color_space_issues"] = grouped
+    
+    # Check PDF file size (limit 650 MB)
+    file_size_bytes = os.path.getsize(pdf_path)
+    file_size_mb = file_size_bytes / (1024 * 1024)
+    results["file_size_mb"] = round(file_size_mb, 2)
+    if file_size_bytes > 650 * 1024 * 1024:
+        results["file_size_issues"].append(
+            f"File size ({file_size_mb:.2f} MB) exceeds KDP limit of 650MB"
+        )
     
     doc.close()
     return results
@@ -378,8 +427,9 @@ def upload_file():
     trim_size = request.form.get('trim_size')
     book_type = request.form.get('book_type', 'paperback')
     color_option = request.form.get('color_option', 'black_white')
+    include_bleed = request.form.get('include_bleed', 'false') == 'true'
     
-    print(f"Upload received: {file.filename}, trim: {trim_size}, type: {book_type}, color: {color_option}")
+    print(f"Upload received: {file.filename}, trim: {trim_size}, type: {book_type}, color: {color_option}, include_bleed: {include_bleed}")
     
     if file.filename == '':
         return jsonify({"error": "No file selected"}), 400
@@ -395,7 +445,28 @@ def upload_file():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        results = check_pdf_for_kdp(filepath, trim_size, book_type, color_option)
+        results = check_pdf_for_kdp(filepath, trim_size, book_type, color_option, include_bleed)
+        
+        # Determine grouping block size based on total page count
+        total_pages = results.get("page_count", 0)
+        if total_pages <= 20:
+            range_size = total_pages  # single block for small docs
+        elif total_pages <= 100:
+            range_size = 10
+        else:
+            range_size = 20
+        page_ranges = {}
+        # First, group images by page
+        pages_images = {}
+        for img in results["color_space_images"]:
+            pages_images.setdefault(img["page"], []).append(img)
+        for page, imgs in pages_images.items():
+            start = ((page - 1) // range_size) * range_size + 1
+            end = start + range_size - 1
+            if end > total_pages:
+                end = total_pages
+            range_label = f"Pages {start}-{end}"
+            page_ranges.setdefault(range_label, []).extend(imgs)
         
         # Log results before sending
         print(f"Validation results:")
@@ -403,12 +474,21 @@ def upload_file():
         print(f"  Page count: {results['page_count']}, valid: {results['page_count_valid']}")
         print(f"  Color space issues: {len(results['color_space_issues'])}")
         print(f"  Color space images: {len(results['color_space_images'])}")
+        print(f"  Font issues: {len(results['font_issues'])}")
+        print(f"  File size: {results['file_size_mb']} MB")
         
         # Clean up the uploaded file
         os.remove(filepath)
         
         # Render a separate results page with left-right layout
-        return render_template('results.html', results=results)
+        return render_template(
+            'results.html',
+            results=results,
+            color_option=color_option,
+            color_options=COLOR_OPTIONS,
+            include_bleed=include_bleed,
+            page_ranges=page_ranges
+        )
 
 @app.route('/templates/index.html')
 def serve_template():
