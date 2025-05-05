@@ -5,6 +5,8 @@ A web application to validate PDF files against Amazon KDP (Kindle Direct Publis
 ## Features
 
 - Upload PDF files for validation
+- Choose validation type: interior manuscript or full cover (back+spine+front)
+- Display detailed cover components breakdown (full cover, front cover, margin, wrap, hinge, spine, safe areas)
 - Choose between paperback and hardcover book types
 - Select from comprehensive list of KDP trim sizes
 - Enter custom trim sizes within KDP bounds (Width 4"–8.5", Height 6"–11.69")
@@ -13,6 +15,7 @@ A web application to validate PDF files against Amazon KDP (Kindle Direct Publis
 - Verify if page count is within KDP limits for selected trim size and color option
 - Verify image color spaces (ensuring CMYK for color printing)
 - Check for proper bleed settings
+- Supports uploads up to 650 MB (cover or interior)
 
 ## Setup Instructions
 
@@ -31,6 +34,7 @@ A web application to validate PDF files against Amazon KDP (Kindle Direct Publis
    ```
    pip install -r requirements.txt
    ```
+   This will install Flask, Werkzeug, Jinja2, PyMuPDF, and Pillow.
 
 5. Run the application:
    ```
@@ -48,6 +52,7 @@ A web application to validate PDF files against Amazon KDP (Kindle Direct Publis
    - Checks if the PDF dimensions match the selected trim size or custom dimensions
    - Verifies if the PDF includes the required bleed area (typically 0.125" on all sides)
    - Validates that page count is within allowed limits for the selected trim size and color option
+   - For cover validation, requires interior page count input to calculate spine thickness and displays a detailed breakdown of cover components
    - For color printing, extracts images from the PDF and confirms they are in CMYK color space
    - Checks image resolution (recommends 300 DPI or higher)
    - Supports custom trim size input within allowed bounds, applying the same tolerance and page-count limits

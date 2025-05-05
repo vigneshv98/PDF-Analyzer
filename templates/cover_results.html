@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KDP Cover Validation Results</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        /* reuse same styles as index/results */
+        body { background: #f2f3f5; font-family: 'Amazon Ember', Arial, sans-serif; color: #232F3E; padding: 2rem; }
+        .main-container { max-width: 800px; margin: auto; background: #fff; padding: 2rem; border: 1px solid #e0e0e0; border-radius: 4px; }
+        .header { background: #232F3E; color: #fff; padding: 1rem; border-radius: 4px; display: flex; align-items: center; margin-bottom: 1.5rem; }
+        .header img { height: 40px; margin-right: 1rem; }
+        .header h1 { margin: 0; color: #FF9900; font-size: 1.75rem; }
+        .results-card { border: 1px solid #ddd; border-radius: 4px; padding: 1.5rem; background: #fff; }
+        .analysis-list { list-style: none; padding: 0; }
+        .analysis-list li { margin-bottom: 0.75rem; }
+        .carousel-item img { max-height: 500px; object-fit: contain; }
+    </style>
+</head>
+<body>
+    <div class="container main-container">
+        <div class="header">
+            <img src="{{ url_for('static', filename='kdp-logo.png') }}" alt="KDP Logo">
+            <h1>KDP Cover Validator</h1>
+        </div>
+        {% if results.error %}
+        <div class="alert alert-danger text-center">
+            {{ results.error }}
+        </div>
+        <div class="text-end mb-4">
+            <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Upload</a>
+        </div>
+        {% else %}
+        <div class="results-card">
+            <h3><i class="bi bi-rulers text-info"></i> Cover Size Check</h3>
+            <ul class="analysis-list">
+                <li>
+                    <i class="bi bi-book text-secondary"></i>
+                    <strong>Book Type:</strong> {{ book_type|capitalize }}<br>
+                    <strong>Wrap/Bleed:</strong> {{ results.bleed_used }}&quot;
+                </li>
+                <li>
+                    <i class="bi bi-check-circle-fill text-{{ 'success' if results.cover_dimensions_valid else 'danger' }}"></i>
+                    <strong>Dimensions:</strong>
+                    Actual: {{ results.actual_width }}&quot; × {{ results.actual_height }}&quot;<br>
+                    Expected: {{ results.expected_width }}&quot; × {{ results.expected_height }}&quot;
+                    {% if results.cover_dimensions_valid %}
+                        <span class="badge bg-success ms-2">Passed</span>
+                    {% else %}
+                        <span class="badge bg-danger ms-2">Failed</span>
+                        <div class="small text-danger mt-1">{{ results.issues | join('; ') }}</div>
+                    {% endif %}
+                </li>
+                <li>
+                    <i class="bi bi-check-circle-fill text-{{ 'success' if results.color_space_issues|length == 0 else 'danger' }}"></i>
+                    <strong>Color Space (CMYK):</strong>
+                    {{ 'Passed' if results.color_space_issues|length == 0 else 'Non-CMYK images found' }}
+                    {% if results.color_space_images %}
+                    <div class="mt-2 d-flex flex-wrap">
+                        {% for img in results.color_space_images %}
+                        <div class="m-1 text-center">
+                            <img src="data:image/png;base64,{{ img.image }}" class="img-thumbnail" style="width:100px;" alt="Page {{ img.page }}">
+                            <div class="small text-danger">Pg {{ img.page }}, #{{ img.index }}</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% if results.color_space_issues %}
+                        <div class="small text-danger mt-1">{{ results.color_space_issues | join('; ') }}</div>
+                    {% endif %}
+                </li>
+            </ul>
+            <!-- Cover components breakdown tables -->
+            <h3 class="mt-4"><i class="bi bi-table text-info"></i> Cover Components</h3>
+            <div class="row">
+                <div class="col-md-6">
+                    <table class="table table-sm table-bordered">
+                        <thead>
+                            <tr><th>#</th><th>Description</th><th>Width (in)</th><th>Height (in)</th></tr>
+                        </thead>
+                        <tbody>
+                        {% for item in results.breakdown[:5] %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
+                                <td>{{ item[0] }}</td>
+                                <td>{{ '%.3f' % item[1] }}</td>
+                                <td>{{ '%.3f' % item[2] }}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <table class="table table-sm table-bordered">
+                        <thead>
+                            <tr><th>#</th><th>Description</th><th>Width (in)</th><th>Height (in)</th></tr>
+                        </thead>
+                        <tbody>
+                        {% for item in results.breakdown[5:] %}
+                            <tr>
+                                <td>{{ loop.index + 5 }}</td>
+                                <td>{{ item[0] }}</td>
+                                <td>{{ '%.3f' % item[1] }}</td>
+                                <td>{{ '%.3f' % item[2] }}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="text-end">
+                <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Upload</a>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html> 

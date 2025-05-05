@@ -108,6 +108,12 @@ KDP_TRIM_SIZES = {
         "standard_color": (72, 600),
         "premium_color": (24, 590)
     }),
+    "8.25 x 11": (8.25, 11, {
+        "black_white": (24, 590),
+        "black_cream": (24, 550),
+        "standard_color": (72, 600),
+        "premium_color": (24, 590)
+    }),
     "8.27 x 11.69": (8.27, 11.69, {
         "black_white": (24, 780),
         "black_cream": (24, 730),
@@ -415,6 +421,112 @@ def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="
     results["processing_time"] = round(end_time - start_time, 2)
     return results
 
+def check_cover_for_kdp(pdf_path, trim_size, color_option, page_count, book_type='paperback', custom_width=None, custom_height=None):
+    # 1) Validate trim size and open PDF
+    # Handle custom trim size
+    if trim_size == 'custom':
+        try:
+            trim_w = float(custom_width)
+            trim_h = float(custom_height)
+        except (TypeError, ValueError):
+            return {"error": "Invalid custom trim dimensions for cover validation."}
+        if not (4 <= trim_w <= 8.5 and 6 <= trim_h <= 11.69):
+            return {"error": "Custom cover trim size out of allowed range."}
+    else:
+        if trim_size not in KDP_TRIM_SIZES:
+            return {"error": f"Trim size '{trim_size}' is not supported for cover validation."}
+        trim_w, trim_h, _ = KDP_TRIM_SIZES[trim_size]
+    # Bleed/wrap: hardcover uses 0.51" wrap, paperback always 0.125"
+    if book_type == 'hardcover':
+        bleed = 0.51
+    else:
+        bleed = 0.125
+    doc = fitz.open(pdf_path)
+    if len(doc) != 1:
+        doc.close()
+        return {"error": "Cover PDF must be exactly one page."}
+    page = doc[0]
+
+    # 2) Measure cover dimensions (points → inches)
+    w_in = page.rect.width / 72.0
+    h_in = page.rect.height / 72.0
+
+    # 3) Determine spine thickness by color option
+    thickness = {
+        "black_white": 0.002252,
+        "black_cream":  0.0025,
+        "standard_color": 0.002252,
+        "premium_color": 0.002347
+    }[color_option]
+    spine_w = page_count * thickness
+    
+    # 4) Calculate expected cover dims
+    if book_type == 'hardcover':
+        # Calibrated to KDP: wrap_bleed = 0.70815" (including bleed+wrap), hinge = 0.346"
+        wrap_bleed = 0.70815
+        hinge = 0.346
+        # width = 2*trim + spine + 2*wrap_bleed + hinge
+        exp_w = (2 * trim_w) + spine_w + (2 * wrap_bleed) + hinge
+        # height = trim height + 2*wrap_bleed
+        exp_h = trim_h + (2 * wrap_bleed)
+    else:
+        # Paperback: standard bleed around edges
+        exp_w = (2 * bleed) + (2 * trim_w) + spine_w
+        exp_h = (2 * bleed) + trim_h
+    
+    # 5) Tolerance check for cover vs expected size
+    tol = 0.05
+    dim_ok = abs(w_in - exp_w) <= tol and abs(h_in - exp_h) <= tol
+    issues = []
+    if not dim_ok:
+        issues.append(
+            f"Cover dimensions ({w_in:.2f}\"×{h_in:.2f}\") don't match expected ({exp_w:.2f}\"×{exp_h:.2f}\")"
+        )
+    
+    # 6) CMYK image scan for cover page
+    color_space_issues = []
+    color_space_images = []
+    if color_option in ["standard_color", "premium_color"]:
+        img_results = process_page((pdf_path, 0))
+        color_space_issues = img_results.get("color_space_issues", [])
+        color_space_images = img_results.get("color_space_images", [])
+    
+    # 7) Close and return detailed cover results
+    doc.close()
+    # Breakdown of cover components
+    spine_margin = 0.062
+    barcode_margin_w, barcode_margin_h = 0.25, 0.375
+    if book_type == 'hardcover':
+        wrap_val = wrap_bleed
+        hinge_val = hinge
+    else:
+        wrap_val = bleed
+        hinge_val = bleed
+    breakdown = [
+        ("Full Cover", exp_w, exp_h),
+        ("Front Cover", trim_w, trim_h),
+        ("Margin", bleed, bleed),
+        ("Wrap", wrap_val, wrap_val),
+        ("Hinge", hinge_val, exp_h),
+        ("Spine", spine_w, trim_h),
+        ("Spine Safe Area", max(spine_w - 2*spine_margin, 0), max(trim_h - 2*spine_margin, 0)),
+        ("Spine Margin", spine_margin, spine_margin),
+        ("Barcode Margin", barcode_margin_w, barcode_margin_h)
+    ]
+    return {
+        "cover_dimensions_valid": dim_ok,
+        "breakdown": breakdown,
+        "actual_width": w_in,
+        "actual_height": h_in,
+        "expected_width": exp_w,
+        "expected_height": exp_h,
+        "spine_width": spine_w,
+        "bleed_used": bleed,
+        "issues": issues,
+        "color_space_issues": color_space_issues,
+        "color_space_images": color_space_images
+    }
+
 @app.route('/', methods=['GET'])
 def index():
     # Pass both trim size options and color options to the template
@@ -432,9 +544,8 @@ def upload_file():
     trim_size = request.form.get('trim_size')
     book_type = request.form.get('book_type', 'paperback')
     color_option = request.form.get('color_option', 'black_white')
-    include_bleed = request.form.get('include_bleed', 'false') == 'true'
     
-    print(f"Upload received: {file.filename}, trim: {trim_size}, type: {book_type}, color: {color_option}, include_bleed: {include_bleed}")
+    print(f"Upload received: {file.filename}, trim: {trim_size}, type: {book_type}, color: {color_option}")
     
     if file.filename == '':
         return jsonify({"error": "No file selected"}), 400
@@ -444,10 +555,42 @@ def upload_file():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
+        # Determine validation mode (interior vs cover)
+        validation_mode = request.form.get('validation_mode', 'interior')
+        if validation_mode == 'cover':
+            # Cover needs interior page count to compute spine
+            page_count_input = request.form.get('page_count')
+            try:
+                page_count = int(page_count_input)
+            except (TypeError, ValueError):
+                os.remove(filepath)
+                return jsonify({"error": "Invalid page count for cover validation"}), 400
+            # Pass book_type and any custom dims
+            results = check_cover_for_kdp(
+                filepath,
+                trim_size,
+                color_option,
+                page_count,
+                book_type,
+                custom_width=request.form.get('custom_width'),
+                custom_height=request.form.get('custom_height')
+            )
+            # cleanup upload
+            os.remove(filepath)
+            # Render cover-specific results
+            return render_template(
+                'cover_results.html',
+                results=results,
+                trim_size=trim_size,
+                color_option=color_option,
+                book_type=book_type,
+                include_bleed=True
+            )
+        
         # Pass custom dimensions if provided
         custom_width = request.form.get('custom_width')
         custom_height = request.form.get('custom_height')
-        results = check_pdf_for_kdp(filepath, trim_size, book_type, color_option, include_bleed, custom_width, custom_height)
+        results = check_pdf_for_kdp(filepath, trim_size, book_type, color_option, custom_width=custom_width, custom_height=custom_height)
         
         # Determine grouping block size based on total page count
         total_pages = results.get("page_count", 0)
@@ -487,7 +630,7 @@ def upload_file():
             results=results,
             color_option=color_option,
             color_options=COLOR_OPTIONS,
-            include_bleed=include_bleed,
+            include_bleed=False,
             page_ranges=page_ranges
         )
 
