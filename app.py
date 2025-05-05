@@ -2,6 +2,7 @@ import os
 import io
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from werkzeug.utils import secure_filename
+from werkzeug.exceptions import RequestEntityTooLarge
 import fitz  # PyMuPDF
 from PIL import Image
 import tempfile
@@ -10,8 +11,12 @@ import re
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
+app.config['MAX_CONTENT_LENGTH'] = 650 * 1024 * 1024  # 650MB max upload
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_file_size_error(e):
+    return jsonify({"error": "File too large. Maximum allowed size is 650MB"}), 413
 
 # KDP trim sizes with page count limits by color option
 # Format: trim_size: (width, height, {color_option: (min_pages, max_pages)})
