@@ -8,6 +8,8 @@ from PIL import Image
 import tempfile
 import base64
 import re
+import time
+from multiprocessing import Pool, cpu_count
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
@@ -235,8 +237,50 @@ def check_color_space(image):
     """Check if an image is in CMYK color space"""
     return image.mode == 'CMYK'
 
+# Helper to process a single page in parallel for CMYK image checks
+def process_page(args):
+    pdf_path, page_idx = args
+    local_results = {"color_space_issues": [], "color_space_images": []}
+    try:
+        doc = fitz.open(pdf_path)
+        page = doc[page_idx]
+        image_list = page.get_images(full=True)
+        for img_index, img_info in enumerate(image_list):
+            xref = img_info[0]
+            base_image = doc.extract_image(xref)
+            image_bytes = base_image["image"]
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
+                tmp.write(image_bytes)
+                tmp_path = tmp.name
+            try:
+                with Image.open(tmp_path) as img:
+                    if not check_color_space(img):
+                        issue = f"Image on page {page_idx+1} (#{img_index+1}) is not in CMYK color space"
+                        local_results["color_space_issues"].append(issue)
+                        img_copy = img.copy()
+                        img_copy.thumbnail((150,150), Image.LANCZOS)
+                        buf = io.BytesIO()
+                        img_copy.save(buf, format="PNG")
+                        b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+                        local_results["color_space_images"].append({
+                            "image": b64,
+                            "page": page_idx+1,
+                            "index": img_index+1,
+                            "width": img.width,
+                            "height": img.height,
+                            "mode": img.mode
+                        })
+            finally:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+        doc.close()
+    except Exception as e:
+        local_results["color_space_issues"].append(f"Error processing page {page_idx+1}: {e}")
+    return local_results
+
 def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="black_white", include_bleed=False, custom_width=None, custom_height=None):
     """Check if PDF meets KDP guidelines"""
+    start_time = time.time()
     print(f"Starting PDF check for {pdf_path}, trim size: {trim_size}, book type: {book_type}, color: {color_option}, include_bleed: {include_bleed}")
     results = {
         "trim_size_match": False,
@@ -246,7 +290,8 @@ def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="
         "page_count_valid": False,
         "bleed_issues": [],
         "file_size_mb": 0.0,
-        "file_size_issues": []
+        "file_size_issues": [],
+        "processing_time": 0.0
     }
     
     # Handle custom trim size (only for paperback)
@@ -329,61 +374,16 @@ def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="
         )
         results["bleed_issues"].append(issue_text)
     
-    # Check images on each page (only for color options that require CMYK)
+    # Parallel CMYK image checks
     if color_option in ["standard_color", "premium_color"]:
-        print(f"Color option requires CMYK check: {color_option}")
-        for page_num, page in enumerate(doc):
-            # Extract images
-            image_list = page.get_images(full=True)
-            print(f"Page {page_num+1}: Found {len(image_list)} images")
-            
-            for img_index, img_info in enumerate(image_list):
-                xref = img_info[0]
-                base_image = doc.extract_image(xref)
-                image_bytes = base_image["image"]
-                print(f"  Processing image #{img_index+1}, xref: {xref}")
-                
-                # Convert to PIL Image
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file:
-                    temp_file.write(image_bytes)
-                    temp_file_path = temp_file.name
-                
-                try:
-                    with Image.open(temp_file_path) as img:
-                        print(f"  Image mode: {img.mode}, size: {img.width}x{img.height}")
-                        # Check color space
-                        if not check_color_space(img):
-                            issue_msg = f"Image on page {page_num+1} (#{img_index+1}) is not in CMYK color space"
-                            results["color_space_issues"].append(issue_msg)
-                            print(f"  NOT CMYK: {issue_msg}")
-                            
-                            # Create a thumbnail for UI display
-                            thumbnail_size = (150, 150)
-                            img_copy = img.copy()
-                            img_copy.thumbnail(thumbnail_size, Image.LANCZOS)
-                            
-                            # Convert to Base64 for sending to frontend
-                            buffer = io.BytesIO()
-                            img_copy.save(buffer, format="PNG")
-                            img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-                            img_size = len(img_base64)
-                            print(f"  Created thumbnail, base64 size: {img_size} bytes")
-                            
-                            # Add the image and metadata to results
-                            results["color_space_images"].append({
-                                "image": img_base64,
-                                "page": page_num+1,
-                                "index": img_index+1,
-                                "width": img.width,
-                                "height": img.height,
-                                "mode": img.mode
-                            })
-                except Exception as e:
-                    results["color_space_issues"].append(f"Error processing image on page {page_num+1}: {str(e)}")
-                finally:
-                    # Clean up temporary file
-                    if os.path.exists(temp_file_path):
-                        os.unlink(temp_file_path)
+        pages_to_check = list(range(results["page_count"]))
+        num_procs = min(len(pages_to_check), max(1, cpu_count() - 1))
+        with Pool(processes=num_procs) as pool:
+            args = [(pdf_path, idx) for idx in pages_to_check]
+            page_results = pool.map(process_page, args)
+        for pr in page_results:
+            results["color_space_issues"].extend(pr["color_space_issues"])
+            results["color_space_images"].extend(pr["color_space_images"])
     
     # Assign slide indices for image preview links
     for i, img in enumerate(results["color_space_images"]):
@@ -411,6 +411,8 @@ def check_pdf_for_kdp(pdf_path, trim_size, book_type="paperback", color_option="
         )
     
     doc.close()
+    end_time = time.time()
+    results["processing_time"] = round(end_time - start_time, 2)
     return results
 
 @app.route('/', methods=['GET'])

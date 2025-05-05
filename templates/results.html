@@ -147,6 +147,9 @@
                             {% endif %}
                         </li>
                     </ul>
+                    <div class="mt-3">
+                        <i class="bi bi-clock-history text-info"></i> <strong>Processing Time:</strong> {{ results.processing_time }} seconds
+                    </div>
                     <div class="text-end">
                         <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Upload</a>
                     </div>
