@@ -5,7 +5,7 @@ A web application to validate PDF files against Amazon KDP (Kindle Direct Publis
 ## Features
 
 - Upload PDF files for validation
-- Choose validation type: interior manuscript or full cover (back+spine+front)
+- Choose validation type: interior manuscript, full cover (back+spine+front), or detailed print issues analysis
 - Display detailed cover components breakdown (full cover, front cover, margin, wrap, hinge, spine, safe areas)
 - Choose between paperback and hardcover book types
 - Select from comprehensive list of KDP trim sizes
@@ -16,6 +16,7 @@ A web application to validate PDF files against Amazon KDP (Kindle Direct Publis
 - Verify image color spaces (ensuring CMYK for color printing)
 - Check for proper bleed settings
 - Supports uploads up to 650 MB (cover or interior)
+- Perform detailed print issue analysis, checking transparency, font embedding, color profiles, image resolution, and margins (optionally for a specified page range with selected trim settings)
 
 ## Setup Instructions
 
@@ -56,6 +57,7 @@ A web application to validate PDF files against Amazon KDP (Kindle Direct Publis
    - For color printing, extracts images from the PDF and confirms they are in CMYK color space
    - Checks image resolution (recommends 300 DPI or higher)
    - Supports custom trim size input within allowed bounds, applying the same tolerance and page-count limits
+   - For print issues analysis, performs deep inspection of transparency effects, font embedding, color profiles, image resolution, and page margins (with page previews).
 
 2. Results are displayed with clear pass/fail indicators for each requirement
 
@@ -66,6 +68,9 @@ A web application to validate PDF files against Amazon KDP (Kindle Direct Publis
 - **Bleed Area**: PDF should include the 0.125" bleed area on all sides
 - **Color Space**: For color printing options, all images should be in CMYK color space
 - **Image Resolution**: All images should have a resolution of at least 300 DPI
+- **Font Embedding**: All fonts must be embedded to ensure proper printing.
+- **Transparency**: No semi-transparent elements should remain to avoid printing artifacts.
+- **Margins**: Content must be within safe margins (≥0.5 inches on all sides).
 
 ## System Requirements
 

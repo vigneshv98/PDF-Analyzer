@@ -527,6 +527,288 @@ def check_cover_for_kdp(pdf_path, trim_size, color_option, page_count, book_type
         "color_space_images": color_space_images
     }
 
+def process_page_for_print(args):
+    """Process a single page for print issues"""
+    pdf_path, page_idx = args
+    results = {
+        "transparency_issues": [],
+        "font_issues": [],
+        "color_profile_issues": [],
+        "margin_issues": [],
+        "resolution_issues": [],
+        "preview": None  # Will store preview image
+    }
+    
+    doc = None
+    try:
+        doc = fitz.open(pdf_path)
+        page = doc[page_idx]
+        
+        # Generate page preview image via PIL to avoid fz_save_pixmap_as_png error
+        pix = page.get_pixmap(matrix=fitz.Matrix(0.15, 0.15), alpha=False)
+        mode = "RGBA" if pix.alpha else "RGB"
+        img = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        b64_preview = base64.b64encode(buf.getvalue()).decode('utf-8')
+        buf.close()
+        results["preview"] = {
+            "page": page_idx + 1,
+            "image": b64_preview,
+            "width": pix.width,
+            "height": pix.height
+        }
+        
+        # 1. Check for transparency
+        # PyMuPDF doesn't directly expose transparency info, indirect approach
+        # Save page as PNG with alpha and check for semi-transparent pixels
+        pix = page.get_pixmap(alpha=True)
+        if pix.alpha:
+            # Check for partially transparent pixels (not just fully transparent or opaque)
+            alpha_data = pix.samples[3::4]  # Every 4th byte is alpha in RGBA format
+            semi_transparent = any(0 < a < 255 for a in alpha_data)
+            if semi_transparent:
+                results["transparency_issues"].append(f"Page {page_idx+1} contains transparency effects")
+        
+        # 2. Check embedded fonts
+        # Get font info for the page
+        font_list = page.get_fonts()
+        for font in font_list:
+            # font tuple: (xref, name, type, embedded, subset)
+            font_name, font_type, is_embedded = font[1], font[2], font[3]
+            if not is_embedded:
+                results["font_issues"].append(f"Page {page_idx+1} uses non-embedded font: {font_name}")
+        
+        # 3. Check image resolution and color profile
+        image_list = page.get_images(full=True)
+        for img_index, img_info in enumerate(image_list):
+            xref = img_info[0]
+            base_image = doc.extract_image(xref)
+            image_bytes = base_image["image"]
+            
+            tmp_path = None
+            img_tmp = None
+            try:
+                img_tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+                tmp_path = img_tmp.name
+                img_tmp.write(image_bytes)
+                img_tmp.close()
+                
+                with Image.open(tmp_path) as img:
+                    # Check color mode/profile
+                    if img.mode not in ['CMYK', 'L', '1']:  # Not CMYK, grayscale or bitmap
+                        results["color_profile_issues"].append(
+                            f"Image on page {page_idx+1} (#{img_index+1}) uses {img.mode} color mode instead of CMYK"
+                        )
+                    
+                    # Check image resolution (assuming 72 dpi for PDF)
+                    # PyMuPDF gives image size in points, we can estimate resolution
+                    width_pt, height_pt = base_image.get("width", 0), base_image.get("height", 0)
+                    if width_pt > 0 and height_pt > 0:
+                        img_width, img_height = img.size
+                        dpi_x = img_width / (width_pt / 72)
+                        dpi_y = img_height / (height_pt / 72)
+                        if min(dpi_x, dpi_y) < 200:  # Usually 300 DPI is recommended, 200 is minimum
+                            results["resolution_issues"].append(
+                                f"Image on page {page_idx+1} (#{img_index+1}) has low resolution: ~{int(min(dpi_x, dpi_y))} DPI"
+                            )
+            finally:
+                # Clean up the temp file if it exists
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception as e:
+                        print(f"Warning: Could not delete temp file {tmp_path}: {e}")
+        
+        # 4. Check margins
+        # Standard print margins are usually 0.5-0.75 inches (36-54 pts)
+        # This is a simple estimate - actual requirements vary by publisher
+        MIN_MARGIN = 36  # 0.5 inches in points
+        width, height = page.rect.width, page.rect.height
+        
+        text_areas = page.search_for(".", quads=True)
+        if text_areas:
+            # Find text boundaries
+            left = min(quad.rect.x0 for quad in text_areas)
+            right = max(quad.rect.x1 for quad in text_areas)
+            top = min(quad.rect.y0 for quad in text_areas)
+            bottom = max(quad.rect.y1 for quad in text_areas)
+            
+            # Check margins
+            left_margin, right_margin = left, width - right
+            top_margin, bottom_margin = top, height - bottom
+            
+            if min(left_margin, right_margin, top_margin, bottom_margin) < MIN_MARGIN:
+                results["margin_issues"].append(
+                    f"Page {page_idx+1} has narrow margins: L:{left_margin/72:.2f}\", R:{right_margin/72:.2f}\", " +
+                    f"T:{top_margin/72:.2f}\", B:{bottom_margin/72:.2f}\" (min recommended: 0.5\")"
+                )
+    except Exception as e:
+        print(f"Error processing page {page_idx+1}: {e}")
+        for issue_type in results:
+            if issue_type != "preview":  # Don't add error message to preview
+                results[issue_type].append(f"Error processing page {page_idx+1}: {e}")
+    finally:
+        # Make sure to close the document
+        if doc:
+            doc.close()
+    
+    return results
+
+def check_pdf_for_print_issues(pdf_path, page_range=None, trim_size=None, book_type='paperback', color_option='black_white', include_bleed=False, custom_width=None, custom_height=None):
+    """Check PDF for printing issues on specified pages or all pages"""
+    start_time = time.time()
+    print(f"Starting print issue analysis for {pdf_path}, page range: {page_range}, trim size: {trim_size}, book type: {book_type}, color: {color_option}, include_bleed: {include_bleed}")
+    # Compute bleed allowance for margin calculations
+    if include_bleed:
+        bleed = 0.51 if book_type == 'hardcover' else 0.125
+    else:
+        bleed = 0.0
+    # Validate trim size (custom or predefined)
+    if trim_size == 'custom':
+        try:
+            trim_w = float(custom_width)
+            trim_h = float(custom_height)
+        except (TypeError, ValueError):
+            return {"general_error": "Invalid custom trim dimensions for print issues", "has_issues": True}
+        if not (4 <= trim_w <= 8.5 and 6 <= trim_h <= 11.69):
+            return {"general_error": "Custom trim size out of allowed range", "has_issues": True}
+    else:
+        trim_sizes_dict = KDP_TRIM_SIZES if book_type == "paperback" else KDP_HARDCOVER_TRIM_SIZES
+        if trim_size not in trim_sizes_dict:
+            return {"general_error": f"Selected trim size {trim_size} is not available for {book_type}", "has_issues": True}
+
+    results = {
+        "trim_size": trim_size,
+        "book_type": book_type,
+        "color_option": color_option,
+        "include_bleed": include_bleed,
+        "custom_width": custom_width,
+        "custom_height": custom_height,
+        "bleed": bleed,
+        "transparency_issues": [],
+        "font_issues": [],
+        "color_profile_issues": [],
+        "margin_issues": [],
+        "resolution_issues": [],
+        "page_count": 0,
+        "processing_time": 0.0,
+        "analyzed_pages": [],
+        "has_issues": False,
+        "page_previews": {}  # Will store preview images by page number
+    }
+    
+    doc = None
+    try:
+        doc = fitz.open(pdf_path)
+        results["page_count"] = len(doc)
+        
+        # Determine which pages to check
+        if page_range:
+            try:
+                # Parse page range like "1-5,7,9-12"
+                pages_to_check = []
+                for part in page_range.split(','):
+                    if '-' in part:
+                        start, end = map(int, part.split('-'))
+                        # Convert 1-based page numbers to 0-based indices
+                        pages_to_check.extend(range(start-1, end))
+                    else:
+                        # Convert 1-based page number to 0-based index
+                        pages_to_check.append(int(part) - 1)
+                # Filter out page numbers that exceed document length
+                pages_to_check = [p for p in pages_to_check if 0 <= p < len(doc)]
+            except ValueError:
+                # If parsing fails, check all pages
+                pages_to_check = list(range(len(doc)))
+        else:
+            # Default to all pages
+            pages_to_check = list(range(len(doc)))
+        
+        # Close the document before multiprocessing to avoid file locking issues
+        doc.close()
+        doc = None
+        
+        # Store which pages were analyzed
+        results["analyzed_pages"] = [p+1 for p in pages_to_check]  # Convert back to 1-based
+        
+        # Parallelized processing for image checks
+        num_procs = min(len(pages_to_check), max(1, cpu_count() - 1))
+        with Pool(processes=num_procs) as pool:
+            args = [(pdf_path, idx) for idx in pages_to_check]
+            page_results = pool.map(process_page_for_print, args)
+            
+        # Process results from each page
+        for page_result in page_results:
+            pr = page_result.get("preview")
+            page_num = pr.get("page") if isinstance(pr, dict) else None
+            
+            # Add page preview if there were any issues on this page
+            has_page_issues = any([
+                page_result.get("transparency_issues"),
+                page_result.get("font_issues"), 
+                page_result.get("color_profile_issues"),
+                page_result.get("margin_issues"),
+                page_result.get("resolution_issues")
+            ])
+            
+            if has_page_issues and page_num and page_result.get("preview"):
+                # Enhance preview with issue categories and details
+                preview = page_result["preview"]
+                categories = []
+                issues_by_category = {}
+                if page_result.get("transparency_issues"):
+                    categories.append("transparency")
+                    issues_by_category["transparency"] = page_result["transparency_issues"]
+                if page_result.get("font_issues"):
+                    categories.append("font")
+                    issues_by_category["font"] = page_result["font_issues"]
+                if page_result.get("color_profile_issues"):
+                    categories.append("color_profile")
+                    issues_by_category["color_profile"] = page_result["color_profile_issues"]
+                if page_result.get("resolution_issues"):
+                    categories.append("resolution")
+                    issues_by_category["resolution"] = page_result["resolution_issues"]
+                if page_result.get("margin_issues"):
+                    categories.append("margin")
+                    issues_by_category["margin"] = page_result["margin_issues"]
+                preview["categories"] = categories
+                preview["issues_by_category"] = issues_by_category
+                results["page_previews"][page_num] = preview
+            
+            if page_result.get("transparency_issues"):
+                results["transparency_issues"].extend(page_result["transparency_issues"])
+            if page_result.get("font_issues"):
+                results["font_issues"].extend(page_result["font_issues"])
+            if page_result.get("color_profile_issues"):
+                results["color_profile_issues"].extend(page_result["color_profile_issues"])
+            if page_result.get("margin_issues"):
+                results["margin_issues"].extend(page_result["margin_issues"])
+            if page_result.get("resolution_issues"):
+                results["resolution_issues"].extend(page_result["resolution_issues"])
+        
+        # Update the has_issues flag if any issues were found
+        results["has_issues"] = any([
+            results["transparency_issues"],
+            results["font_issues"], 
+            results["color_profile_issues"],
+            results["margin_issues"],
+            results["resolution_issues"]
+        ])
+        
+    except Exception as e:
+        print(f"Error analyzing PDF: {e}")
+        results["general_error"] = str(e)
+        results["has_issues"] = True
+    finally:
+        # Make sure to close the document if it's still open
+        if doc:
+            doc.close()
+    
+    end_time = time.time()
+    results["processing_time"] = round(end_time - start_time, 2)
+    return results
+
 @app.route('/', methods=['GET'])
 def index():
     # Pass both trim size options and color options to the template
@@ -541,98 +823,145 @@ def upload_file():
         return jsonify({"error": "No file part"}), 400
     
     file = request.files['file']
-    trim_size = request.form.get('trim_size')
-    book_type = request.form.get('book_type', 'paperback')
-    color_option = request.form.get('color_option', 'black_white')
-    
-    print(f"Upload received: {file.filename}, trim: {trim_size}, type: {book_type}, color: {color_option}")
     
     if file.filename == '':
         return jsonify({"error": "No file selected"}), 400
     
-    if file:
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        
-        # Determine validation mode (interior vs cover)
-        validation_mode = request.form.get('validation_mode', 'interior')
-        if validation_mode == 'cover':
-            # Cover needs interior page count to compute spine
-            page_count_input = request.form.get('page_count')
-            try:
-                page_count = int(page_count_input)
-            except (TypeError, ValueError):
-                os.remove(filepath)
-                return jsonify({"error": "Invalid page count for cover validation"}), 400
-            # Pass book_type and any custom dims
-            results = check_cover_for_kdp(
-                filepath,
-                trim_size,
-                color_option,
-                page_count,
-                book_type,
-                custom_width=request.form.get('custom_width'),
-                custom_height=request.form.get('custom_height')
-            )
-            # cleanup upload
-            os.remove(filepath)
-            # Render cover-specific results
-            return render_template(
-                'cover_results.html',
+    temp_file_path = None
+    try:
+        if file:
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+            temp_file_path = filepath  # Keep track of the file path for cleanup
+            
+            # Determine validation mode
+            validation_mode = request.form.get('validation_mode', 'interior')
+            
+            # Handle print issues analysis
+            if validation_mode == 'print_issues':
+                page_range = request.form.get('page_range', '')
+                # Get trim size and other parameters
+                trim_size = request.form.get('trim_size')
+                book_type = request.form.get('book_type', 'paperback')
+                color_option = request.form.get('color_option', 'black_white')
+                include_bleed = request.form.get('include_bleed', 'false').lower() in ['true', '1', 'yes', 'on']
+                custom_width = request.form.get('custom_width')
+                custom_height = request.form.get('custom_height')
+                results = check_pdf_for_print_issues(
+                    filepath,
+                    page_range,
+                    trim_size=trim_size,
+                    book_type=book_type,
+                    color_option=color_option,
+                    include_bleed=include_bleed,
+                    custom_width=custom_width,
+                    custom_height=custom_height
+                )
+                # Render the print issues results template
+                response = render_template(
+                    'print_issues_results.html',
+                    results=results,
+                    trim_size=trim_size,
+                    color_option=color_option,
+                    book_type=book_type,
+                    include_bleed=include_bleed
+                )
+                return response
+            
+            # Handle cover validation
+            if validation_mode == 'cover':
+                # Cover needs interior page count to compute spine
+                page_count_input = request.form.get('page_count')
+                try:
+                    page_count = int(page_count_input)
+                except (TypeError, ValueError):
+                    return jsonify({"error": "Invalid page count for cover validation"}), 400
+                
+                # Get trim size and other parameters
+                trim_size = request.form.get('trim_size')
+                book_type = request.form.get('book_type', 'paperback')
+                color_option = request.form.get('color_option', 'black_white')
+                
+                # Pass book_type and any custom dims
+                results = check_cover_for_kdp(
+                    filepath,
+                    trim_size,
+                    color_option,
+                    page_count,
+                    book_type,
+                    custom_width=request.form.get('custom_width'),
+                    custom_height=request.form.get('custom_height')
+                )
+                
+                # Render cover-specific results
+                response = render_template(
+                    'cover_results.html',
+                    results=results,
+                    trim_size=trim_size,
+                    color_option=color_option,
+                    book_type=book_type,
+                    include_bleed=True
+                )
+                return response
+            
+            # Handle interior validation (default)
+            trim_size = request.form.get('trim_size')
+            book_type = request.form.get('book_type', 'paperback')
+            color_option = request.form.get('color_option', 'black_white')
+            
+            # Pass custom dimensions if provided
+            custom_width = request.form.get('custom_width')
+            custom_height = request.form.get('custom_height')
+            results = check_pdf_for_kdp(filepath, trim_size, book_type, color_option, custom_width=custom_width, custom_height=custom_height)
+            
+            # Determine grouping block size based on total page count
+            total_pages = results.get("page_count", 0)
+            if total_pages <= 20:
+                range_size = total_pages  # single block for small docs
+            elif total_pages <= 100:
+                range_size = 10
+            else:
+                range_size = 20
+            page_ranges = {}
+            # First, group images by page
+            pages_images = {}
+            for img in results["color_space_images"]:
+                pages_images.setdefault(img["page"], []).append(img)
+            for page, imgs in pages_images.items():
+                start = ((page - 1) // range_size) * range_size + 1
+                end = start + range_size - 1
+                if end > total_pages:
+                    end = total_pages
+                range_label = f"Pages {start}-{end}"
+                page_ranges.setdefault(range_label, []).extend(imgs)
+            
+            # Log results before sending
+            print(f"Validation results:")
+            print(f"  Trim size match: {results['trim_size_match']}")
+            print(f"  Page count: {results['page_count']}, valid: {results['page_count_valid']}")
+            print(f"  Color space issues: {len(results['color_space_issues'])}")
+            print(f"  Color space images: {len(results['color_space_images'])}")
+            print(f"  File size: {results['file_size_mb']} MB")
+            
+            # Render a separate results page with left-right layout
+            response = render_template(
+                'results.html',
                 results=results,
-                trim_size=trim_size,
                 color_option=color_option,
-                book_type=book_type,
-                include_bleed=True
+                color_options=COLOR_OPTIONS,
+                include_bleed=False,
+                page_ranges=page_ranges
             )
-        
-        # Pass custom dimensions if provided
-        custom_width = request.form.get('custom_width')
-        custom_height = request.form.get('custom_height')
-        results = check_pdf_for_kdp(filepath, trim_size, book_type, color_option, custom_width=custom_width, custom_height=custom_height)
-        
-        # Determine grouping block size based on total page count
-        total_pages = results.get("page_count", 0)
-        if total_pages <= 20:
-            range_size = total_pages  # single block for small docs
-        elif total_pages <= 100:
-            range_size = 10
-        else:
-            range_size = 20
-        page_ranges = {}
-        # First, group images by page
-        pages_images = {}
-        for img in results["color_space_images"]:
-            pages_images.setdefault(img["page"], []).append(img)
-        for page, imgs in pages_images.items():
-            start = ((page - 1) // range_size) * range_size + 1
-            end = start + range_size - 1
-            if end > total_pages:
-                end = total_pages
-            range_label = f"Pages {start}-{end}"
-            page_ranges.setdefault(range_label, []).extend(imgs)
-        
-        # Log results before sending
-        print(f"Validation results:")
-        print(f"  Trim size match: {results['trim_size_match']}")
-        print(f"  Page count: {results['page_count']}, valid: {results['page_count_valid']}")
-        print(f"  Color space issues: {len(results['color_space_issues'])}")
-        print(f"  Color space images: {len(results['color_space_images'])}")
-        print(f"  File size: {results['file_size_mb']} MB")
-        
+            return response
+    finally:
         # Clean up the uploaded file
-        os.remove(filepath)
-        
-        # Render a separate results page with left-right layout
-        return render_template(
-            'results.html',
-            results=results,
-            color_option=color_option,
-            color_options=COLOR_OPTIONS,
-            include_bleed=False,
-            page_ranges=page_ranges
-        )
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except Exception as e:
+                print(f"Warning: Could not delete temporary file {temp_file_path}: {e}")
+                # Don't raise the exception so the response is still sent
 
 @app.route('/templates/index.html')
 def serve_template():

@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Print Issue Analysis Results - KDP PDF Validator</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        /* Branding */
+        :root { --amazon-orange:#FF9900; --amazon-dark:#232F3E; --amazon-font:'Amazon Ember',Arial,sans-serif; }
+        body { background:#f2f3f5; font-family:var(--amazon-font); padding:2rem; }
+        .main-container { max-width:1000px; margin:auto; background:#fff; padding:2rem; border:1px solid #e0e0e0; border-radius:4px; }
+        .header { background:var(--amazon-dark); color:#fff; padding:1rem; border-radius:4px; display:flex; align-items:center; margin-bottom:1.5rem; }
+        .header img { height:40px; margin-right:1rem; }
+        .header h1 { margin:0; color:var(--amazon-orange); font-size:1.75rem; }
+        .btn-amazon {
+            background-color: var(--amazon-orange) !important;
+            border-color: var(--amazon-orange) !important;
+            color: #fff !important;
+        }
+        .btn-amazon:hover {
+            background-color: #e68a00 !important;
+            border-color: #e68a00 !important;
+        }
+        .issue-card {
+            border-left: 4px solid;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background-color: rgba(0,0,0,0.02);
+        }
+        .issue-card.warning { border-color: #fd7e14; }
+        .issue-card.error { border-color: #dc3545; }
+        .issue-card.success { border-color: #198754; }
+        .issue-title {
+            display: flex;
+            align-items: center;
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        .issue-title i {
+            margin-right: 0.5rem;
+            font-size: 1.3rem;
+        }
+        .issue-count {
+            margin-left: auto;
+            font-size: 0.9rem;
+            background: rgba(0,0,0,0.1);
+            padding: 0.2rem 0.6rem;
+            border-radius: 20px;
+        }
+        .issue-list {
+            padding-left: 1.5rem;
+            margin-bottom: 0;
+        }
+        .result-summary {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            border-radius: 4px;
+        }
+        .result-summary.has-issues {
+            background-color: rgba(220, 53, 69, 0.1);
+            border: 1px solid rgba(220, 53, 69, 0.2);
+        }
+        .result-summary.no-issues {
+            background-color: rgba(25, 135, 84, 0.1);
+            border: 1px solid rgba(25, 135, 84, 0.2);
+        }
+        .summary-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+        }
+        .summary-title i {
+            margin-right: 0.5rem;
+        }
+        .nav-pills .nav-link.active {
+            background-color: var(--amazon-dark);
+        }
+        .page-preview-img {
+            max-height: 300px;
+            object-fit: contain;
+            border: 1px solid #eee;
+        }
+        .tooltip {
+            position: absolute;
+            z-index: 1070;
+            display: block;
+            margin: 0;
+            font-family: var(--amazon-font);
+            font-style: normal;
+            font-weight: 400;
+            line-height: 1.5;
+            text-align: left;
+            text-decoration: none;
+            text-shadow: none;
+            text-transform: none;
+            letter-spacing: normal;
+            word-break: normal;
+            word-spacing: normal;
+            white-space: normal;
+            line-break: auto;
+            font-size: 0.875rem;
+            word-wrap: break-word;
+            opacity: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container main-container">
+        <!-- KDP Header -->
+        <div class="header bg-amazon-dark d-flex align-items-center mb-4" style="padding:1rem;border-radius:4px;">
+            <img src="{{ url_for('static', filename='kdp-logo.png') }}" alt="KDP Logo" style="height:60px;margin-right:1rem;">
+            <div>
+                <h1 class="text-orange m-0">Print Issues Analysis</h1>
+                <p class="lead m-0" style="color:#eaeaea;">Results of your PDF print issue scan</p>
+            </div>
+        </div>
+
+        <!-- Selected Options -->
+        <div class="results-card mb-4">
+            <h3><i class="bi bi-gear-wide-connected text-info"></i> Selected Options</h3>
+            <ul class="analysis-list">
+                <li><strong>Trim Size:</strong> {{ trim_size }}</li>
+                <li><strong>Book Type:</strong> {{ book_type }}</li>
+                <li><strong>Color Option:</strong> {{ color_option }}</li>
+                <li><strong>Include Bleed:</strong> {{ 'Yes' if include_bleed else 'No' }}</li>
+                {% if results.custom_width and results.custom_height %}
+                <li><strong>Custom Dimensions:</strong> {{ results.custom_width }}" x {{ results.custom_height }}"</li>
+                {% endif %}
+            </ul>
+        </div>
+
+        <!-- Result summary -->
+        <div class="result-summary {% if results.has_issues %}has-issues{% else %}no-issues{% endif %}">
+            <div class="summary-title">
+                {% if results.has_issues %}
+                <i class="bi bi-exclamation-triangle-fill text-danger"></i> Print Issues Detected
+                {% else %}
+                <i class="bi bi-check-circle-fill text-success"></i> No Print Issues Detected
+                {% endif %}
+            </div>
+            <div class="summary-details">
+                <p>Analyzed {{ results.analyzed_pages|length }} of {{ results.page_count }} pages{% if results.analyzed_pages|length < results.page_count %} (pages {{ results.analyzed_pages|join(', ') }}){% endif %}</p>
+                <p>Processing time: {{ results.processing_time }} seconds</p>
+                {% if results.general_error %}
+                <div class="alert alert-danger">{{ results.general_error }}</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Navigation tabs -->
+        <ul class="nav nav-pills mb-3" id="issuesTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="summary-tab" data-bs-toggle="tab" data-bs-target="#summary" type="button" role="tab" aria-controls="summary" aria-selected="true">Summary</button>
+            </li>
+            {% if results.page_previews %}
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="previews-tab" data-bs-toggle="tab" data-bs-target="#previews" type="button" role="tab" aria-controls="previews" aria-selected="false">Page Previews</button>
+            </li>
+            {% endif %}
+            {% if results.transparency_issues %}
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="transparency-tab" data-bs-toggle="tab" data-bs-target="#transparency" type="button" role="tab" aria-controls="transparency" aria-selected="false">Transparency</button>
+            </li>
+            {% endif %}
+            {% if results.font_issues %}
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="fonts-tab" data-bs-toggle="tab" data-bs-target="#fonts" type="button" role="tab" aria-controls="fonts" aria-selected="false">Fonts</button>
+            </li>
+            {% endif %}
+            {% if results.color_profile_issues %}
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="color-tab" data-bs-toggle="tab" data-bs-target="#color" type="button" role="tab" aria-controls="color" aria-selected="false">Color Profiles</button>
+            </li>
+            {% endif %}
+            {% if results.resolution_issues %}
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="resolution-tab" data-bs-toggle="tab" data-bs-target="#resolution" type="button" role="tab" aria-controls="resolution" aria-selected="false">Resolution</button>
+            </li>
+            {% endif %}
+            {% if results.margin_issues %}
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="margins-tab" data-bs-toggle="tab" data-bs-target="#margins" type="button" role="tab" aria-controls="margins" aria-selected="false">Margins</button>
+            </li>
+            {% endif %}
+        </ul>
+
+        <!-- Tab content -->
+        <div class="tab-content" id="issuesTabContent">
+            <!-- Summary Tab -->
+            <div class="tab-pane fade show active" id="summary" role="tabpanel" aria-labelledby="summary-tab">
+                <h3 class="mb-3">Issue Summary</h3>
+                
+                {% if not results.has_issues %}
+                <div class="alert alert-success">
+                    <i class="bi bi-check-circle-fill"></i> No print issues detected in the analyzed pages.
+                </div>
+                {% else %}
+                <div class="row">
+                    <!-- Transparency -->
+                    <div class="col-md-6 mb-3">
+                        <div class="issue-card {% if results.transparency_issues %}warning{% else %}success{% endif %}">
+                            <div class="issue-title">
+                                {% if results.transparency_issues %}
+                                <i class="bi bi-exclamation-triangle-fill text-warning"></i> Transparency Issues
+                                <span class="issue-count">{{ results.transparency_issues|length }}</span>
+                                {% else %}
+                                <i class="bi bi-check-circle-fill text-success"></i> No Transparency Issues
+                                {% endif %}
+                            </div>
+                            <p class="small">Transparent elements can cause printing problems if not properly flattened.</p>
+                        </div>
+                    </div>
+
+                    <!-- Fonts -->
+                    <div class="col-md-6 mb-3">
+                        <div class="issue-card {% if results.font_issues %}warning{% else %}success{% endif %}">
+                            <div class="issue-title">
+                                {% if results.font_issues %}
+                                <i class="bi bi-exclamation-triangle-fill text-warning"></i> Font Issues
+                                <span class="issue-count">{{ results.font_issues|length }}</span>
+                                {% else %}
+                                <i class="bi bi-check-circle-fill text-success"></i> No Font Issues
+                                {% endif %}
+                            </div>
+                            <p class="small">All fonts should be embedded in the PDF to ensure proper printing.</p>
+                        </div>
+                    </div>
+
+                    <!-- Color Profiles -->
+                    <div class="col-md-6 mb-3">
+                        <div class="issue-card {% if results.color_profile_issues %}warning{% else %}success{% endif %}">
+                            <div class="issue-title">
+                                {% if results.color_profile_issues %}
+                                <i class="bi bi-exclamation-triangle-fill text-warning"></i> Color Profile Issues
+                                <span class="issue-count">{{ results.color_profile_issues|length }}</span>
+                                {% else %}
+                                <i class="bi bi-check-circle-fill text-success"></i> No Color Profile Issues
+                                {% endif %}
+                            </div>
+                            <p class="small">Images for print should use CMYK color space for accurate color reproduction.</p>
+                        </div>
+                    </div>
+
+                    <!-- Resolution -->
+                    <div class="col-md-6 mb-3">
+                        <div class="issue-card {% if results.resolution_issues %}warning{% else %}success{% endif %}">
+                            <div class="issue-title">
+                                {% if results.resolution_issues %}
+                                <i class="bi bi-exclamation-triangle-fill text-warning"></i> Resolution Issues
+                                <span class="issue-count">{{ results.resolution_issues|length }}</span>
+                                {% else %}
+                                <i class="bi bi-check-circle-fill text-success"></i> No Resolution Issues
+                                {% endif %}
+                            </div>
+                            <p class="small">Images should be at least 300 DPI for high-quality print reproduction.</p>
+                        </div>
+                    </div>
+
+                    <!-- Margins -->
+                    <div class="col-md-6 mb-3">
+                        <div class="issue-card {% if results.margin_issues %}warning{% else %}success{% endif %}">
+                            <div class="issue-title">
+                                {% if results.margin_issues %}
+                                <i class="bi bi-exclamation-triangle-fill text-warning"></i> Margin Issues
+                                <span class="issue-count">{{ results.margin_issues|length }}</span>
+                                {% else %}
+                                <i class="bi bi-check-circle-fill text-success"></i> No Margin Issues
+                                {% endif %}
+                            </div>
+                            <p class="small">Safe printing margins should be at least 0.5 inches from page edges.</p>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Page Previews Tab -->
+            {% if results.page_previews %}
+            <div class="tab-pane fade" id="previews" role="tabpanel" aria-labelledby="previews-tab">
+                <h3 class="mb-3">Pages with Issues <span class="badge bg-warning text-dark">{{ results.page_previews|length }}</span></h3>
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle-fill"></i> These are previews of pages where issues were detected. Click on a preview to see details.
+                </div>
+
+                <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+                    {% for page_num, preview in results.page_previews.items() %}
+                    <div class="col">
+                        <div class="card h-100">
+                            <div class="card-header d-flex align-items-center">
+                                <strong>Page {{ page_num }}</strong>
+                                
+                                <div class="ms-auto">
+                                    {% for cat in preview.categories %}
+                                        {% if cat == 'transparency' %}
+                                        <span class="badge bg-warning text-dark" data-bs-toggle="tooltip" title="Transparency Issues">
+                                            <i class="bi bi-layers"></i>
+                                        </span>
+                                        {% elif cat == 'font' %}
+                                        <span class="badge bg-warning text-dark" data-bs-toggle="tooltip" title="Font Issues">
+                                            <i class="bi bi-fonts"></i>
+                                        </span>
+                                        {% elif cat == 'color_profile' %}
+                                        <span class="badge bg-warning text-dark" data-bs-toggle="tooltip" title="Color Profile Issues">
+                                            <i class="bi bi-palette"></i>
+                                        </span>
+                                        {% elif cat == 'resolution' %}
+                                        <span class="badge bg-warning text-dark" data-bs-toggle="tooltip" title="Resolution Issues">
+                                            <i class="bi bi-image"></i>
+                                        </span>
+                                        {% elif cat == 'margin' %}
+                                        <span class="badge bg-warning text-dark" data-bs-toggle="tooltip" title="Margin Issues">
+                                            <i class="bi bi-layout-text-sidebar"></i>
+                                        </span>
+                                        {% endif %}
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <img src="data:image/png;base64,{{ preview.image }}" class="card-img-top page-preview-img" alt="Preview of page {{ page_num }}">
+                            <div class="card-body">
+                                <p class="card-text small">
+                                    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#issues-page-{{ page_num }}" aria-expanded="false">
+                                        Show Issues <i class="bi bi-chevron-down"></i>
+                                    </button>
+                                </p>
+                                <div class="collapse" id="issues-page-{{ page_num }}">
+                                    <ul class="list-group list-group-flush small">
+                                        {% for cat, issues in preview.issues_by_category.items() %}
+                                            {% for issue in issues %}
+                                            <li class="list-group-item list-group-item-warning">
+                                                {% if cat == 'transparency' %}<i class="bi bi-layers"></i>
+                                                {% elif cat == 'font' %}<i class="bi bi-fonts"></i>
+                                                {% elif cat == 'color_profile' %}<i class="bi bi-palette"></i>
+                                                {% elif cat == 'resolution' %}<i class="bi bi-image"></i>
+                                                {% elif cat == 'margin' %}<i class="bi bi-layout-text-sidebar"></i>
+                                                {% endif %}
+                                                {{ issue }}
+                                            </li>
+                                            {% endfor %}
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Transparency Tab -->
+            {% if results.transparency_issues %}
+            <div class="tab-pane fade" id="transparency" role="tabpanel" aria-labelledby="transparency-tab">
+                <h3 class="mb-3">Transparency Issues <span class="badge bg-warning text-dark">{{ results.transparency_issues|length }}</span></h3>
+                <div class="alert alert-warning">
+                    <i class="bi bi-info-circle-fill"></i> Transparency effects may not print as expected and can cause printing issues. Consider flattening transparency before printing.
+                </div>
+                <ul class="list-group mb-4">
+                    {% for issue in results.transparency_issues %}
+                    <li class="list-group-item">{{ issue }}</li>
+                    {% endfor %}
+                </ul>
+                <div class="card">
+                    <div class="card-header">How to Fix</div>
+                    <div class="card-body">
+                        <p>To fix transparency issues:</p>
+                        <ol>
+                            <li>Open your document in the original editing software (e.g., Adobe InDesign, Illustrator)</li>
+                            <li>Export to PDF with the "Flatten Transparency" option enabled</li>
+                            <li>In Adobe Acrobat Pro, you can also use the "Print Production" tools and select "Flattener Preview"</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Fonts Tab -->
+            {% if results.font_issues %}
+            <div class="tab-pane fade" id="fonts" role="tabpanel" aria-labelledby="fonts-tab">
+                <h3 class="mb-3">Font Issues <span class="badge bg-warning text-dark">{{ results.font_issues|length }}</span></h3>
+                <div class="alert alert-warning">
+                    <i class="bi bi-info-circle-fill"></i> Non-embedded fonts can be substituted during printing, causing unexpected text formatting or layout issues.
+                </div>
+                <ul class="list-group mb-4">
+                    {% for issue in results.font_issues %}
+                    <li class="list-group-item">{{ issue }}</li>
+                    {% endfor %}
+                </ul>
+                <div class="card">
+                    <div class="card-header">How to Fix</div>
+                    <div class="card-body">
+                        <p>To fix font embedding issues:</p>
+                        <ol>
+                            <li>Open your document in the original editing software</li>
+                            <li>When exporting to PDF, enable the "Embed all fonts" option</li>
+                            <li>In Adobe Acrobat Pro, you can check font embedding under File > Properties > Fonts</li>
+                            <li>For InDesign, go to Export Adobe PDF > Advanced and set "Subset fonts when percent of characters used is less than" to 100%</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Color Profiles Tab -->
+            {% if results.color_profile_issues %}
+            <div class="tab-pane fade" id="color" role="tabpanel" aria-labelledby="color-tab">
+                <h3 class="mb-3">Color Profile Issues <span class="badge bg-warning text-dark">{{ results.color_profile_issues|length }}</span></h3>
+                <div class="alert alert-warning">
+                    <i class="bi bi-info-circle-fill"></i> Images using RGB or other non-CMYK color profiles may print with unexpected colors. Professional printing requires CMYK color space.
+                </div>
+                <ul class="list-group mb-4">
+                    {% for issue in results.color_profile_issues %}
+                    <li class="list-group-item">{{ issue }}</li>
+                    {% endfor %}
+                </ul>
+                <div class="card">
+                    <div class="card-header">How to Fix</div>
+                    <div class="card-body">
+                        <p>To fix color profile issues:</p>
+                        <ol>
+                            <li>Open your images in Adobe Photoshop or similar software</li>
+                            <li>Convert the color mode to CMYK (Image > Mode > CMYK Color)</li>
+                            <li>Save the images and reimport them into your document</li>
+                            <li>When exporting to PDF, set the output color profile to CMYK</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Resolution Tab -->
+            {% if results.resolution_issues %}
+            <div class="tab-pane fade" id="resolution" role="tabpanel" aria-labelledby="resolution-tab">
+                <h3 class="mb-3">Resolution Issues <span class="badge bg-warning text-dark">{{ results.resolution_issues|length }}</span></h3>
+                <div class="alert alert-warning">
+                    <i class="bi bi-info-circle-fill"></i> Low-resolution images (below 300 DPI) can appear pixelated or blurry in print.
+                </div>
+                <ul class="list-group mb-4">
+                    {% for issue in results.resolution_issues %}
+                    <li class="list-group-item">{{ issue }}</li>
+                    {% endfor %}
+                </ul>
+                <div class="card">
+                    <div class="card-header">How to Fix</div>
+                    <div class="card-body">
+                        <p>To fix resolution issues:</p>
+                        <ol>
+                            <li>Replace low-resolution images with higher-resolution versions (ideally 300 DPI or higher)</li>
+                            <li>If the original image isn't available at higher resolution, consider recreating the image</li>
+                            <li>Avoid scaling images up in your document as this doesn't increase actual resolution</li>
+                            <li>For text or vector graphics, ensure they're created as vectors, not rasterized</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Margins Tab -->
+            {% if results.margin_issues %}
+            <div class="tab-pane fade" id="margins" role="tabpanel" aria-labelledby="margins-tab">
+                <h3 class="mb-3">Margin Issues <span class="badge bg-warning text-dark">{{ results.margin_issues|length }}</span></h3>
+                <div class="alert alert-warning">
+                    <i class="bi bi-info-circle-fill"></i> Content too close to page edges may be cut off during printing or binding. KDP recommends at least 0.5" margins.
+                </div>
+                <ul class="list-group mb-4">
+                    {% for issue in results.margin_issues %}
+                    <li class="list-group-item">{{ issue }}</li>
+                    {% endfor %}
+                </ul>
+                <div class="card">
+                    <div class="card-header">How to Fix</div>
+                    <div class="card-body">
+                        <p>To fix margin issues:</p>
+                        <ol>
+                            <li>Return to your original document and adjust the page margins</li>
+                            <li>For KDP, ensure all text and important elements are at least 0.5" from page edges</li>
+                            <li>For the inside margin (binding edge), consider using at least 0.75" margin</li>
+                            <li>Reposition any elements that are too close to page edges</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Actions -->
+        <div class="mt-4 text-center">
+            <a href="/" class="btn btn-secondary me-2">
+                <i class="bi bi-arrow-left"></i> Back to Home
+            </a>
+            <a href="#" class="btn btn-amazon" onclick="window.print();">
+                <i class="bi bi-printer"></i> Print Report
+            </a>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center text-muted mt-4">
+            <small>This tool checks your PDF for potential print issues. For more information, visit the <a href="https://kdp.amazon.com/en_US/help/topic/G201834180" target="_blank">KDP Help Center</a></small>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Initialize tooltips
+        document.addEventListener('DOMContentLoaded', function() {
+            var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+            var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+                return new bootstrap.Tooltip(tooltipTriggerEl);
+            });
+        });
+    </script>
+</body>
+</html> 
