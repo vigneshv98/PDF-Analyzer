@@ -1,6 +1,6 @@
 import os
 import io
-from flask import Flask, render_template, request, jsonify, redirect, url_for
+from flask import Flask, render_template, request, jsonify
 from werkzeug.utils import secure_filename
 from werkzeug.exceptions import RequestEntityTooLarge
 import fitz  # PyMuPDF
@@ -264,7 +264,7 @@ def process_page(args):
                         issue = f"Image on page {page_idx+1} (#{img_index+1}) is not in CMYK color space"
                         local_results["color_space_issues"].append(issue)
                         img_copy = img.copy()
-                        img_copy.thumbnail((150,150), Image.LANCZOS)
+                        # Removed thumbnail resizing to preserve original image quality
                         buf = io.BytesIO()
                         img_copy.save(buf, format="PNG")
                         b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
@@ -544,8 +544,8 @@ def process_page_for_print(args):
         doc = fitz.open(pdf_path)
         page = doc[page_idx]
         
-        # Generate page preview image via PIL to avoid fz_save_pixmap_as_png error
-        pix = page.get_pixmap(matrix=fitz.Matrix(0.15, 0.15), alpha=False)
+        # Generate higher-resolution preview by using full-scale matrix
+        pix = page.get_pixmap(matrix=fitz.Matrix(1.0, 1.0), alpha=False)
         mode = "RGBA" if pix.alpha else "RGB"
         img = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
         buf = io.BytesIO()
@@ -962,13 +962,6 @@ def upload_file():
             except Exception as e:
                 print(f"Warning: Could not delete temporary file {temp_file_path}: {e}")
                 # Don't raise the exception so the response is still sent
-
-@app.route('/templates/index.html')
-def serve_template():
-    return render_template('index.html', 
-                          paperback_trim_sizes=list(KDP_TRIM_SIZES.keys()),
-                          hardcover_trim_sizes=list(KDP_HARDCOVER_TRIM_SIZES.keys()),
-                          color_options=COLOR_OPTIONS)
 
 if __name__ == '__main__':
     app.run(debug=True)
